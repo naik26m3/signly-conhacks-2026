@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     seaweedfs_filer_url: str = "http://seaweedfs-filer:8888"
 
     class Config:
-        env_file = ".env"
+        env_file = ("../.env", ".env")
         env_file_encoding = "utf-8"
 
 settings = Settings()
