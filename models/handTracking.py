@@ -57,42 +57,44 @@ class HandTracker:
 
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        if not cap.isOpened():
+            cap.release()
+            raise ValueError(f"Cannot open video: {video_path}")
 
         landmark_sequence: list[dict] = []
-        best_frame = None
         best_annotated = None
         best_count = 0
         frame_idx = 0
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            timestamp_ms = int((frame_idx / fps) * 1000)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = cls._landmarker.detect_for_video(mp_img, timestamp_ms)
+                timestamp_ms = int((frame_idx / fps) * 1000)
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                result = cls._landmarker.detect_for_video(mp_img, timestamp_ms)
 
-            count = sum(len(hand) for hand in result.hand_landmarks)
-            if count > best_count:
-                best_count = count
-                best_frame = frame.copy()
-                best_annotated = _draw_landmarks(frame, result)
+                count = sum(len(hand) for hand in result.hand_landmarks)
+                if count > best_count:
+                    best_count = count
+                    best_annotated = _draw_landmarks(frame, result)
 
-            if frame_idx % 3 == 0 and result.hand_landmarks:
-                entry: dict = {"frame": frame_idx}
-                for hand_landmarks, handedness in zip(result.hand_landmarks, result.handedness):
-                    side = "right" if handedness[0].category_name == "Right" else "left"
-                    entry[side] = [
-                        [round(lm.x, 4), round(lm.y, 4), round(lm.z, 4)]
-                        for lm in hand_landmarks
-                    ]
-                landmark_sequence.append(entry)
+                if frame_idx % 3 == 0 and result.hand_landmarks:
+                    entry: dict = {"frame": frame_idx}
+                    for hand_landmarks, handedness in zip(result.hand_landmarks, result.handedness):
+                        side = "right" if handedness[0].category_name == "Right" else "left"
+                        entry[side] = [
+                            [round(lm.x, 4), round(lm.y, 4), round(lm.z, 4)]
+                            for lm in hand_landmarks
+                        ]
+                    landmark_sequence.append(entry)
 
-            frame_idx += 1
-
-        cap.release()
+                frame_idx += 1
+        finally:
+            cap.release()
 
         landmarks_found = best_count > 0
 
