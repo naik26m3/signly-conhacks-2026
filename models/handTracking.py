@@ -1,4 +1,3 @@
-import base64
 import logging
 from pathlib import Path
 
@@ -32,11 +31,11 @@ class HandTracker:
         logger.info("Loading MediaPipe HandLandmarker from %s", _MODEL_PATH)
         options = vision.HandLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=str(_MODEL_PATH)),
-            running_mode=vision.RunningMode.IMAGE,
+            running_mode=vision.RunningMode.VIDEO,
             num_hands=2,
         )
         cls._landmarker = vision.HandLandmarker.create_from_options(options)
-        logger.info("HandLandmarker ready")
+        logger.info("HandLandmarker ready (VIDEO mode)")
 
     @classmethod
     def unload(cls) -> None:
@@ -46,49 +45,62 @@ class HandTracker:
             logger.info("HandLandmarker unloaded")
 
     @classmethod
-    def process_video(cls, video_path: str, video_id: str = "") -> tuple[str, bool]:
-        """
-        Scan every frame, pick the one with the most hand landmarks visible,
-        draw the landmarks on it, save a debug PNG, and return (base64_jpg, landmarks_found).
+    def process_video(cls, video_path: str, video_id: str = "") -> tuple[list[dict], bool]:
+        """Process video in VIDEO mode, return (landmark_sequence, landmarks_found).
+
+        landmark_sequence: list of per-frame dicts sampled every 3rd frame.
+        Each entry: {"frame": int, "right": [[x,y,z]x21], "left": [[x,y,z]x21]}
+        landmarks_found: True if any hand was detected in any frame.
         """
         if cls._landmarker is None:
             raise RuntimeError("HandTracker not loaded — call HandTracker.load() at startup")
 
         cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+        landmark_sequence: list[dict] = []
         best_frame = None
         best_annotated = None
         best_count = 0
+        frame_idx = 0
 
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
+
+            timestamp_ms = int((frame_idx / fps) * 1000)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = cls._landmarker.detect(mp_img)
+            result = cls._landmarker.detect_for_video(mp_img, timestamp_ms)
+
             count = sum(len(hand) for hand in result.hand_landmarks)
             if count > best_count:
                 best_count = count
                 best_frame = frame.copy()
                 best_annotated = _draw_landmarks(frame, result)
 
+            if frame_idx % 3 == 0 and result.hand_landmarks:
+                entry: dict = {"frame": frame_idx}
+                for hand_landmarks, handedness in zip(result.hand_landmarks, result.handedness):
+                    side = "right" if handedness[0].category_name == "Right" else "left"
+                    entry[side] = [
+                        [round(lm.x, 4), round(lm.y, 4), round(lm.z, 4)]
+                        for lm in hand_landmarks
+                    ]
+                landmark_sequence.append(entry)
+
+            frame_idx += 1
+
         cap.release()
 
-        if best_frame is None:
-            logger.warning("No frames could be read from %s", video_path)
-            return "", False
+        landmarks_found = best_count > 0
 
-        # Fall back to un-annotated frame if no hands found
-        if best_annotated is None:
-            best_annotated = best_frame
+        if best_annotated is not None:
+            _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+            tag = video_id or Path(video_path).stem
+            debug_path = _DEBUG_DIR / f"{tag}.png"
+            cv2.imwrite(str(debug_path), best_annotated)
+            logger.info("Debug frame saved → %s  (landmarks: %d)", debug_path, best_count)
 
-        # Save debug PNG so you can open it and see what goes to Gemini
-        _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-        tag = video_id or Path(video_path).stem
-        debug_path = _DEBUG_DIR / f"{tag}.png"
-        cv2.imwrite(str(debug_path), best_annotated)
-        logger.info("Debug frame saved → %s  (landmarks detected: %d)", debug_path, best_count)
-
-        _, buf = cv2.imencode(".jpg", best_annotated)
-        b64 = base64.b64encode(buf).decode()
-        return b64, best_count > 0
+        return landmark_sequence, landmarks_found
