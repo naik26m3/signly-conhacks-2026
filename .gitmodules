@@ -1,0 +1,9 @@
+[submodule "skills/expo-skills"]
+	path = skills/expo-skills
+	url = https://github.com/expo/skills
+[submodule "skills/callstack-skills"]
+	path = skills/callstack-skills
+	url = https://github.com/callstackincubator/agent-skills
+[submodule "skills/fastapi"]
+	path = skills/fastapi
+	url = https://github.com/tiangolo/fastapi
