@@ -9,6 +9,7 @@ services:
       - ./backend:/app
     depends_on:
       - postgres
+      - redis
       - seaweedfs-master
       - seaweedfs-volume
       - seaweedfs-filer
@@ -24,6 +25,14 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
   seaweedfs-master:
@@ -54,4 +63,5 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   seaweedfs_data:

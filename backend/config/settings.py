@@ -1,11 +1,21 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    # API
+    api_version: str = "v1"
+
+    # AI models
     gemini_api_key: str = ""
     elevenlabs_api_key: str = ""
-    database_url: str = ""
+
+    # PostgreSQL
+    database_url: str = "postgresql+asyncpg://aslbridge:changeme@postgres:5432/aslbridge"
+
+    # Redis
+    redis_url: str = "redis://redis:6379/0"
+
+    # SeaweedFS
     seaweedfs_filer_url: str = "http://seaweedfs-filer:8888"
-    api_version: str = "v1"
 
     class Config:
         env_file = ".env"
