@@ -41,25 +41,40 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
         await redis.setex(f"sign:{video_id}", 3600, json.dumps({"status": "error", "detail": "Could not retrieve video"}))
         return
 
-    # Write to temp file for OpenCV
+    # Hand tracking + Gemini (tmp file must stay alive through recognize_sign)
     tmp_path = None
+    sign = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp.write(contents)
             tmp_path = tmp.name
+
         loop = asyncio.get_running_loop()
-        frame_b64, landmarks_found = await loop.run_in_executor(
+        landmark_sequence, landmarks_found = await loop.run_in_executor(
             None, HandTracker.process_video, tmp_path, video_id
         )
+
+        if not landmarks_found:
+            await redis.setex(f"sign:{video_id}", 3600, json.dumps({
+                "status": "done",
+                "gloss": "NO_HAND",
+                "english": "No hand detected — try again",
+                "confidence": 0.0,
+                "landmarks_found": False,
+                "audio_url": None,
+            }))
+            logger.info("process_sign_video: no hands detected for video_id=%s", video_id)
+            return
+
+        sign = await inference.recognize_sign(tmp_path, landmark_sequence)
+
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-    if not frame_b64:
-        await redis.setex(f"sign:{video_id}", 3600, json.dumps({"status": "error", "detail": "No frames extracted from video"}))
+    if sign is None:
         return
 
-    sign = await inference.recognize_sign(frame_b64)
     gloss = sign["gloss"]
     english = sign["english"]
     confidence = sign["confidence"]
@@ -98,7 +113,7 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
         "gloss": gloss,
         "english": english,
         "confidence": confidence,
-        "landmarks_found": landmarks_found,
+        "landmarks_found": True,
         "audio_url": audio_url,
     }
     try:
@@ -107,13 +122,13 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
             gloss=gloss,
             english=english,
             confidence=confidence,
-            landmarks_found=landmarks_found,
+            landmarks_found=True,
         )
     except Exception:
         logger.warning("collector.log_inference failed", exc_info=True)
 
     await redis.setex(f"sign:{video_id}", 3600, json.dumps(payload))
-    logger.info("process_sign_video done: video_id=%s status=done audio_url=%s", video_id, audio_url)
+    logger.info("process_sign_video done: video_id=%s gloss=%s audio_url=%s", video_id, gloss, audio_url)
 
 
 async def startup(ctx: dict) -> None:
