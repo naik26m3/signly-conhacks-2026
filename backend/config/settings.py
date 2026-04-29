@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     elevenlabs_api_key: str = ""
 
+    # Langfuse LLM observability (optional — leave blank to disable)
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     # PostgreSQL
     database_url: str = "postgresql+asyncpg://aslbridge:changeme@postgres:5432/aslbridge"
 
