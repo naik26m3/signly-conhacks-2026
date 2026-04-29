@@ -39,17 +39,17 @@ export function VideoPreview({ uri, upload, onSend, onCancel, onReset }: Props) 
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => { player.pause(); onCancel(); }}
-              disabled={upload.kind === 'uploading'}
+              disabled={upload.kind === 'uploading' || upload.kind === 'processing'}
             >
               <Text style={styles.buttonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.sendButton, upload.kind === 'uploading' && styles.disabled]}
+              style={[styles.sendButton, (upload.kind === 'uploading' || upload.kind === 'processing') && styles.disabled]}
               onPress={onSend}
-              disabled={upload.kind === 'uploading'}
+              disabled={upload.kind === 'uploading' || upload.kind === 'processing'}
             >
               <Text style={styles.buttonText}>
-                {upload.kind === 'uploading' ? 'Analysing…' : 'Recognise Sign'}
+                {upload.kind === 'uploading' ? 'Uploading…' : 'Recognise Sign'}
               </Text>
             </TouchableOpacity>
           </>
@@ -64,7 +64,16 @@ function ResultPanel({ upload }: { upload: UploadResult }) {
     return (
       <View style={styles.panel}>
         <ActivityIndicator color="#fff" size="large" />
-        <Text style={styles.label}>Processing hand gesture…</Text>
+        <Text style={styles.label}>Uploading video…</Text>
+      </View>
+    );
+  }
+
+  if (upload.kind === 'processing') {
+    return (
+      <View style={styles.panel}>
+        <ActivityIndicator color="#fff" size="large" />
+        <Text style={styles.label}>Analysing sign…</Text>
       </View>
     );
   }

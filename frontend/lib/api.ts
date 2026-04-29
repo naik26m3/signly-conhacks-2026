@@ -54,17 +54,29 @@ export const api = {
 
 // ── endpoints ─────────────────────────────────────────────────────────────
 
-export type RecognizeResponse = {
+export type QueuedResponse = {
   api_version: string;
   video_id: string;
-  gloss: string;
-  english: string;
-  confidence: number;
-  landmarks_found: boolean;
+  status: 'processing';
+};
+
+export type SignResultResponse = {
+  api_version: string;
+  video_id: string;
+  status: 'done' | 'error' | 'processing';
+  gloss?: string;
+  english?: string;
+  confidence?: number;
+  landmarks_found?: boolean;
+  detail?: string;
 };
 
 export function recognizeSign(uri: string) {
   const formData = new FormData();
   formData.append('file', { uri, type: 'video/mp4', name: 'sign.mp4' } as any);
-  return api.post<RecognizeResponse>('/api/v1/sign/recognize', formData);
+  return api.post<QueuedResponse>('/api/v1/sign/recognize', formData);
+}
+
+export function getSignResult(videoId: string) {
+  return api.get<SignResultResponse>(`/api/v1/sign/result/${videoId}`);
 }
