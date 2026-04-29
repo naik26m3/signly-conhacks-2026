@@ -8,3 +8,4 @@ backend/models/mutemotion-wlasl-translation-model.ipynb
 *.zip
 *.txt
 *.json
+.env
