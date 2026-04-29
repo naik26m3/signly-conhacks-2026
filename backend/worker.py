@@ -7,21 +7,27 @@ import tempfile
 import httpx
 from arq.connections import RedisSettings
 
+from config.database import Database
+from config.elevenlabs import ElevenLabsClient
 from config.gemini import GeminiClient
 from config.langfuse import LangfuseClient
 from config.settings import settings
 from models.handTracking import HandTracker
 from services.collector import collector
+from services.conversation import insert_message, upsert_conversation
 from services.inference import InferenceService
+from services.speech import SpeechService
 from services.storage import save_bytes
 
 logger = logging.getLogger(__name__)
 
 
-async def process_sign_video(ctx: dict, video_id: str, content_type: str) -> None:
+async def process_sign_video(ctx: dict, video_id: str, content_type: str, session_id: str | None = None) -> None:
     """Download video from SeaweedFS, run hand tracking + Gemini, store result in Redis."""
     redis = ctx["redis"]
     inference: InferenceService = ctx["inference"]
+    speech: SpeechService = ctx["speech"]
+    db_session = ctx["db_session"]
 
     # Download video from SeaweedFS
     url = f"{settings.seaweedfs_filer_url}/videos/{video_id}.mp4"
@@ -50,29 +56,64 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str) -> Non
             os.unlink(tmp_path)
 
     if not frame_b64:
-        payload = {"status": "error", "detail": "No frames extracted from video"}
-    else:
-        sign = await inference.recognize_sign(frame_b64)
-        payload = {
-            "status": "done",
-            "gloss": sign["gloss"],
-            "english": sign["english"],
-            "confidence": sign["confidence"],
-            "landmarks_found": landmarks_found,
-        }
-        try:
-            await collector.log_inference(
-                video_id=video_id,
-                gloss=sign["gloss"],
-                english=sign["english"],
-                confidence=sign["confidence"],
-                landmarks_found=landmarks_found,
-            )
-        except Exception:
-            logger.warning("collector.log_inference failed", exc_info=True)
+        await redis.setex(f"sign:{video_id}", 3600, json.dumps({"status": "error", "detail": "No frames extracted from video"}))
+        return
+
+    sign = await inference.recognize_sign(frame_b64)
+    gloss = sign["gloss"]
+    english = sign["english"]
+    confidence = sign["confidence"]
+
+    # TTS: synthesise audio and save to SeaweedFS
+    audio_url: str | None = None
+    try:
+        audio_bytes = await speech.synthesize(english)
+        if audio_bytes:
+            result = await save_bytes(audio_bytes, video_id, "audio/mpeg", folder="audio", ext="mp3")
+            audio_url = result["url"]
+    except Exception:
+        logger.warning("TTS or audio save failed for video_id=%s", video_id, exc_info=True)
+
+    # Persist conversation + message
+    try:
+        import uuid as _uuid
+        sid = _uuid.UUID(session_id) if session_id else _uuid.uuid4()
+        async with db_session() as session:
+            async with session.begin():
+                conv = await upsert_conversation(session, sid)
+                await insert_message(
+                    session,
+                    conversation_id=conv.id,
+                    direction="deaf_to_hearing",
+                    content=english,
+                    gloss=gloss,
+                    audio_url=audio_url,
+                    confidence=confidence,
+                )
+    except Exception:
+        logger.warning("DB insert failed for video_id=%s", video_id, exc_info=True)
+
+    payload = {
+        "status": "done",
+        "gloss": gloss,
+        "english": english,
+        "confidence": confidence,
+        "landmarks_found": landmarks_found,
+        "audio_url": audio_url,
+    }
+    try:
+        await collector.log_inference(
+            video_id=video_id,
+            gloss=gloss,
+            english=english,
+            confidence=confidence,
+            landmarks_found=landmarks_found,
+        )
+    except Exception:
+        logger.warning("collector.log_inference failed", exc_info=True)
 
     await redis.setex(f"sign:{video_id}", 3600, json.dumps(payload))
-    logger.info("process_sign_video done: video_id=%s status=%s", video_id, payload["status"])
+    logger.info("process_sign_video done: video_id=%s status=done audio_url=%s", video_id, audio_url)
 
 
 async def startup(ctx: dict) -> None:
@@ -87,6 +128,9 @@ async def startup(ctx: dict) -> None:
     gemini = GeminiClient.connect()
     langfuse = LangfuseClient.connect()
     ctx["inference"] = InferenceService(gemini=gemini, langfuse=langfuse)
+    elevenlabs = ElevenLabsClient.connect()
+    ctx["speech"] = SpeechService(elevenlabs=elevenlabs)
+    ctx["db_session"] = Database.Session
     logger.info("ARQ worker started")
 
 
