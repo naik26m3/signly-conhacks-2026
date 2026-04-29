@@ -6,7 +6,11 @@ from alembic import context
 
 from config.settings import settings
 from config.database import Base
-import models  # noqa: F401 — registers all models with Base.metadata
+try:
+    import models  # noqa: F401 — registers all models with Base.metadata
+except ModuleNotFoundError:
+    pass
+from db import models as _db_models  # noqa: F401 — registers Conversation + Message
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

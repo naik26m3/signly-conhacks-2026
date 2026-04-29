@@ -40,13 +40,22 @@ Scan the QR code with Expo Go on your phone.
 
 ---
 
+## How it works
+
+**Deaf → Hearing:** User records a short ASL sign (H.264, 480p, max 30s). The backend runs MediaPipe HandLandmarker in VIDEO mode to extract a 21-point landmark sequence sampled every 3rd frame. The video and landmark data are sent together to Gemini via the Files API — Gemini uses both the visual motion and the spatial trajectory to identify the sign. The result is read aloud to the hearing person via ElevenLabs TTS.
+
+**Hearing → Deaf:** Hearing person speaks. ElevenLabs Scribe transcribes the audio to text. The transcript is displayed in large readable text on the deaf user's screen and converted to ASL gloss.
+
+All past turns are stored per-session and accessible as a chat history.
+
+---
+
 ## API keys needed
 
 | Key | Where to get it | Used for |
 |---|---|---|
-| `GEMINI_API_KEY` | aistudio.google.com | Primary ASL vision model |
-| `GROQ_API_KEY` | console.groq.com | Whisper STT + Llama translation |
-| `OPENAI_API_KEY` | platform.openai.com | GPT-4o mini fallback vision |
+| `GEMINI_API_KEY` | aistudio.google.com | ASL video recognition (Files API + landmark prompt) |
+| `ELEVENLABS_API_KEY` | elevenlabs.io | TTS (deaf→hearing audio) + Scribe STT (hearing→deaf) |
 
 ---
 

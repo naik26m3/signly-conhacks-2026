@@ -4,120 +4,236 @@ FastAPI backend for ASL Bridge. See `docs/PLAN.md` for system architecture and A
 
 ---
 
+## Dev Setup (run without Docker)
+
+**Prerequisites:** Python 3.11+, Docker Desktop running (for databases only)
+
+**1. Start databases only (not the api container):**
+```bash
+docker compose up postgres redis seaweedfs-master seaweedfs-volume seaweedfs-filer -d
+```
+
+**2. Create and activate the virtual environment:**
+```bash
+cd backend
+python -m venv .venv
+source .venv/Scripts/activate   # Windows Git Bash
+# or: .venv\Scripts\Activate.ps1  (PowerShell)
+# or: source .venv/bin/activate   (Mac/Linux)
+```
+
+**3. Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
+
+**4. Run migrations:**
+```bash
+PYTHONPATH=.. alembic upgrade head
+```
+
+**5. Run the server:**
+```bash
+PYTHONPATH=.. python server.py
+# or: PYTHONPATH=.. uvicorn main:app --reload --port 8000
+```
+
+API docs at `http://localhost:8000/docs`
+
+**Why `backend/.env` exists:**
+The root `.env` uses Docker-internal hostnames (`postgres`, `redis`, `seaweedfs-filer`).
+`backend/.env` overrides those to `localhost` so uvicorn on your laptop can reach the DBs.
+
+**Debug frames:**
+Processed frames are saved to `debug/frames/<video_id>.png` — what gets sent to Gemini.
+
+---
+
 ## File Structure
 
 ```
 backend/
-├── main.py
+├── main.py                      # FastAPI app factory, lifespan, routers
+├── server.py                    # Uvicorn entrypoint
+├── worker.py                    # ARQ worker (sign recognition + TTS + DB)
+├── config/
+│   ├── settings.py              # Pydantic Settings (loads .env)
+│   ├── database.py              # Async SQLAlchemy engine + session
+│   ├── redis.py                 # Redis connection pool
+│   ├── gemini.py                # Gemini client factory
+│   ├── elevenlabs.py            # ElevenLabs client factory
+│   └── langfuse.py              # Langfuse observability client
+├── db/
+│   └── models.py                # SQLAlchemy ORM: Conversation + Message
+├── migrations/
+│   ├── env.py                   # Alembic async env
+│   └── versions/
+│       └── a1b2c3d4e5f6_add_conversations_messages.py
+├── middleware/
+│   └── request_logger.py        # JSON request/response logging
 ├── routers/
-│   ├── health.py      # GET /api/v1/health
-│   ├── asl.py         # POST /api/v1/asl/recognize, /corrections
-│   ├── speech.py      # POST /api/v1/speech/transcribe
-│   └── dataset.py     # GET /api/v1/dataset/stats
+│   ├── health.py                # GET /api/v1/health
+│   ├── uploads.py               # POST /api/v1/uploads/video
+│   ├── sign.py                  # POST /api/v1/sign/recognize + GET /result/{id} + corrections
+│   ├── speech.py                # POST /api/v1/speech/transcribe
+│   └── conversations.py         # GET /api/v1/conversations/{session_id}/messages
+├── schemas/
+│   ├── sign.py                  # QueuedResponse, SignResultResponse, corrections
+│   ├── speech.py                # TranscribeResponse
+│   ├── conversation.py          # MessageItem, ConversationMessagesResponse
+│   ├── upload.py                # UploadVideoResponse, UploadTextResponse
+│   └── health.py                # HealthResponse
 ├── services/
-│   ├── video.py       # OpenCV preprocessing (Bob)
-│   ├── inference.py   # Gemini 3.1 Pro + Flash-Lite calls
-│   ├── speech.py      # ElevenLabs STT + TTS
-│   └── collector.py   # JSONL auto-logging
-├── models/            # Pydantic request/response schemas
-├── uploads/           # Saved video/audio files (Docker volume)
-├── data/
-│   └── raw/           # JSONL training data (Docker volume)
-├── requirements.txt
-├── .env.example
-├── Dockerfile
-└── docker-compose.yml
+│   ├── storage.py               # SeaweedFS upload + validation (unified save_bytes)
+│   ├── inference.py             # Gemini: recognize_sign, gloss↔english
+│   ├── speech.py                # ElevenLabs: transcribe (STT) + synthesize (TTS)
+│   ├── conversation.py          # DB helpers: upsert_conversation, insert_message
+│   └── collector.py             # JSONL auto-logging for inference + corrections
+└── tests/
+    ├── test_storage_audio.py
+    ├── test_conversation_service.py
+    └── test_conversations_router.py
+
+models/                          # ML model files (project root, not inside backend/)
+├── handTracking.py
+└── hand_landmarker.task
 ```
 
 ---
 
-## Standard Response Shape
+## API Endpoints
 
-Every endpoint returns `api_version` so clients always know what version responded.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/health` | Health check |
+| POST | `/api/v1/uploads/video` | Upload video, store in SeaweedFS |
+| POST | `/api/v1/sign/recognize` | Queue sign recognition job (ARQ) |
+| GET | `/api/v1/sign/result/{video_id}` | Poll job result |
+| POST | `/api/v1/sign/corrections` | Submit correction for a recognition |
+| GET | `/api/v1/sign/corrections` | List recent corrections |
+| POST | `/api/v1/speech/transcribe` | STT via ElevenLabs Scribe → transcript + gloss |
+| GET | `/api/v1/conversations/{session_id}/messages` | Fetch full chat thread |
+
+### Session ID
+
+Both `POST /sign/recognize` and `POST /speech/transcribe` accept `X-Session-ID` header (optional UUID). If missing, the backend generates one. All messages from the same session are grouped into one `Conversation` row.
+
+### Sign Result Shape
+
+```json
+{
+  "api_version": "v1",
+  "video_id": "...",
+  "status": "done",
+  "gloss": "HELLO",
+  "english": "Hello",
+  "confidence": 0.92,
+  "landmarks_found": true,
+  "audio_url": "http://<filer>/audio/<video_id>.mp3"
+}
+```
+
+`audio_url` is `null` if TTS synthesis failed — recognition result is still returned.
+
+### Conversation Messages Shape
+
+```json
+{
+  "api_version": "v1",
+  "conversation_id": "...",
+  "total": 4,
+  "messages": [
+    {
+      "id": "...",
+      "direction": "deaf_to_hearing",
+      "content": "Hello",
+      "gloss": "HELLO",
+      "audio_url": "http://<filer>/audio/<video_id>.mp3",
+      "confidence": 0.92,
+      "created_at": "2026-04-29T14:32:00Z"
+    },
+    {
+      "id": "...",
+      "direction": "hearing_to_deaf",
+      "content": "How are you?",
+      "gloss": "HOW YOU",
+      "audio_url": null,
+      "confidence": null,
+      "created_at": "2026-04-29T14:32:18Z"
+    }
+  ]
+}
+```
+
+---
+
+## Worker Flow
+
+The ARQ worker (`worker.py`) runs as a separate process:
+
+```
+process_sign_video(video_id, content_type, session_id):
+  1. Download video from SeaweedFS
+  2. Write to temp file
+  3. HandTracker.process_video() [VIDEO mode] → landmark_sequence + landmarks_found
+  4. If not landmarks_found:
+       write Redis { status: "done", gloss: "NO_HAND", english: "No hand detected — try again", confidence: 0.0 }
+       return  ← no Gemini call, no TTS, no DB insert
+  5. inference.recognize_sign(tmp_path, landmark_sequence)
+       → upload video to Gemini Files API
+       → generate_content(video + landmark JSON prompt)
+       → delete file from Gemini Files API
+       → { gloss, english, confidence }
+  6. delete temp file
+  7. ElevenLabs TTS(english) → audio_bytes
+  8. save_bytes(audio_bytes, video_id, folder="audio", ext="mp3") → audio_url
+  9. upsert_conversation(session_id) + insert_message(deaf_to_hearing)
+  10. Write Redis result: { status, gloss, english, confidence, landmarks_found, audio_url }
+```
+
+---
+
+## Storage
+
+`services/storage.py` — one `save_bytes()` function for all media:
 
 ```python
-class BaseResponse(BaseModel):
-    api_version: str = "v1"
+# Video (default)
+await save_bytes(contents, file_id, "video/mp4")
+# → SeaweedFS /videos/{file_id}.mp4
+
+# TTS audio
+await save_bytes(audio_bytes, video_id, "audio/mpeg", folder="audio", ext="mp3")
+# → SeaweedFS /audio/{video_id}.mp3
 ```
 
-All response models inherit from `BaseResponse`.
+---
+
+## Database
+
+Two tables — `conversations` (one per session) and `messages` (many per conversation):
+
+- `direction`: `"deaf_to_hearing"` | `"hearing_to_deaf"`
+- `user_id` on `conversations` is nullable — populated when auth is added
+- Messages ordered by `created_at ASC` for chat thread rendering
 
 ---
 
-## Tasks
+## What's Done ✓
 
-### Setup
-- [ ] Scaffold folder structure
-- [ ] `requirements.txt` — fastapi, uvicorn, python-multipart, opencv-python, google-genai, elevenlabs, aiofiles, python-dotenv
-- [ ] `.env.example` with all required keys (`GEMINI_API_KEY`, `ELEVENLABS_API_KEY`)
-- [ ] `Dockerfile` — Python 3.11 slim, copy requirements, install, expose 8000
-- [ ] `docker-compose.yml` — service + volumes for `uploads/` and `data/raw/`
-- [ ] `main.py` — app factory, register routers, CORS middleware (allow all in dev)
-
-### Health router (`routers/health.py`)
-- [ ] `GET /api/v1/health`
-  - Return `{ api_version, status, uptime, keys_set: { gemini, elevenlabs } }`
-
-### ASL router (`routers/asl.py`)
-- [ ] `POST /api/v1/asl/recognize`
-  - Accept `video: UploadFile`
-  - Validate content type (video/mp4, video/quicktime)
-  - Save to `uploads/{uuid}.mp4`
-  - Call `services/video.py` → preprocessed frame
-  - Call `services/inference.py` → gloss + English + confidence
-  - Call `services/collector.py` → log to JSONL
-  - Return `{ api_version, gloss, english, confidence, video_id }`
-- [ ] `POST /api/v1/asl/corrections`
-  - Accept `{ video_id, correct_gloss, notes? }`
-  - Append to `data/raw/corrections.jsonl`
-  - Return `{ api_version, id, saved: true }`
-- [ ] `GET /api/v1/asl/corrections`
-  - Read `data/raw/corrections.jsonl`
-  - Return `{ api_version, total, recent[] }`
-
-### Speech router (`routers/speech.py`)
-- [ ] `POST /api/v1/speech/transcribe`
-  - Accept `audio: UploadFile`
-  - Save to `uploads/{uuid}.m4a`
-  - Call `services/speech.py` → ElevenLabs Scribe → English transcript
-  - Call `services/inference.py` → Gemini Flash-Lite → ASL gloss
-  - Return `{ api_version, transcript, gloss }`
-
-### Dataset router (`routers/dataset.py`)
-- [ ] `GET /api/v1/dataset/stats`
-  - Count lines in `data/raw/*.jsonl`
-  - Return `{ api_version, total_samples, corrections, last_updated }`
-
-### Services
-- [ ] `services/video.py` (Bob owns, Dave integrates)
-  - Input: video file path
-  - Output: base64-encoded best frame
-- [ ] `services/inference.py`
-  - `recognize_sign(frame_b64)` → Gemini 3.1 Pro → `{ gloss, confidence }`
-  - `gloss_to_english(gloss)` → Gemini 3.1 Flash-Lite → English string
-  - `english_to_gloss(text)` → Gemini 3.1 Flash-Lite → gloss string
-- [ ] `services/speech.py`
-  - `transcribe(audio_path)` → ElevenLabs Scribe → English string
-  - `synthesize(text)` → ElevenLabs TTS → audio bytes (for future use)
-- [ ] `services/collector.py`
-  - `log_inference(video_id, frame_b64, gloss, confidence, timestamp)` → append JSONL
-
-### Models (`models/`)
-- [ ] `BaseResponse` — `{ api_version: "v1" }`
-- [ ] `RecognizeResponse(BaseResponse)` — `{ gloss, english, confidence, video_id }`
-- [ ] `CorrectionRequest` — `{ video_id, correct_gloss, notes? }`
-- [ ] `CorrectionResponse(BaseResponse)` — `{ id, saved }`
-- [ ] `CorrectionsListResponse(BaseResponse)` — `{ total, recent[] }`
-- [ ] `TranscribeResponse(BaseResponse)` — `{ transcript, gloss }`
-- [ ] `DatasetStatsResponse(BaseResponse)` — `{ total_samples, corrections, last_updated }`
-- [ ] `HealthResponse(BaseResponse)` — `{ status, uptime, keys_set }`
+- Health, uploads, sign recognition, speech transcribe, corrections endpoints
+- ARQ worker queue with async sign recognition
+- ElevenLabs TTS synthesis + audio saved to SeaweedFS
+- Conversation + message persistence (session-based, auth-ready)
+- `GET /api/v1/conversations/{session_id}/messages` chat history endpoint
+- Observability: JSON logs, Prometheus metrics, Langfuse LLM tracing
+- All routers use `Annotated` params + return type annotations (FastAPI skill compliant)
 
 ---
 
-## Notes
+## What's Left [ ]
 
-- Everything returns text for now — no binary/video responses yet
-- All file I/O must be async (`aiofiles`) — no blocking calls in async routes
-- Business logic stays in `services/`, routers just validate + delegate
-- Confidence threshold: if `confidence < 0.6` set `gloss = "signing..."` in response
-- Two API keys only: `GEMINI_API_KEY` and `ELEVENLABS_API_KEY`
+- [ ] Auth (user accounts) — `user_id` column on `conversations` is ready, just needs a users table + JWT middleware
+- [x] Video optimization — HandTracker VIDEO mode + landmark sequence + Gemini Files API (replaces single-frame approach)
+- [ ] Run `alembic upgrade head` in CI / Docker entrypoint
+- [ ] Wire tests into Docker Compose for CI
