@@ -1,7 +1,10 @@
 from fastapi import APIRouter
 
+from schemas.health import HealthResponse
+
 router = APIRouter(prefix="/api/v1", tags=["health"])
 
+
 @router.get("/health")
-async def health():
-    return {"api_version": "v1", "status": "ok"}
+async def health() -> HealthResponse:
+    return HealthResponse()

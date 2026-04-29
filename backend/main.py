@@ -11,7 +11,7 @@ from config.elevenlabs import ElevenLabsClient
 from config.langfuse import LangfuseClient
 from middleware.request_logger import log_requests
 from models.handTracking import HandTracker
-from routers import health, sign, speech, uploads
+from routers import conversations, health, sign, speech, uploads
 from services.inference import InferenceService
 from services.speech import SpeechService
 
@@ -50,3 +50,4 @@ app.include_router(health.router)
 app.include_router(sign.router)
 app.include_router(speech.router)
 app.include_router(uploads.router)
+app.include_router(conversations.router)

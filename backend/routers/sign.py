@@ -2,14 +2,21 @@ import json
 import logging
 import uuid
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from arq import create_pool
 from arq.connections import RedisSettings
 
 from config.redis import RedisClient
 from config.settings import settings
-from schemas.sign import CorrectionRequest, CorrectionResponse, CorrectionsListResponse
+from schemas.sign import (
+    CorrectionRequest,
+    CorrectionResponse,
+    CorrectionsListResponse,
+    QueuedResponse,
+    SignResultResponse,
+)
 from services import storage
 from services.collector import collector
 
@@ -24,40 +31,41 @@ async def _get_arq():
 
 
 @router.post("/recognize", status_code=202)
-async def recognize(file: UploadFile = File(...)):
+async def recognize(
+    file: Annotated[UploadFile, File()],
+    x_session_id: Annotated[str | None, Header()] = None,
+) -> QueuedResponse:
     valid, reason = await storage.validate(file)
     if not valid:
         raise HTTPException(status_code=400, detail=reason)
 
     video_id = str(uuid.uuid4())
+    session_id = x_session_id or str(uuid.uuid4())
     contents = await file.read()
 
-    # Save video to SeaweedFS first — worker will download it
     try:
         await storage.save_bytes(contents, video_id, file.content_type or "video/mp4")
     except Exception:
         logger.error("SeaweedFS save failed for video_id=%s", video_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to store video")
 
-    # Mark as queued in Redis
     await RedisClient.client().setex(
         f"sign:{video_id}", 3600, json.dumps({"status": "processing"})
     )
 
-    # Enqueue ARQ job
     arq = await _get_arq()
-    await arq.enqueue_job("process_sign_video", video_id, file.content_type or "video/mp4")
+    await arq.enqueue_job("process_sign_video", video_id, file.content_type or "video/mp4", session_id)
     await arq.aclose()
 
-    return {"api_version": "v1", "video_id": video_id, "status": "processing"}
+    return QueuedResponse(video_id=video_id)
 
 
 @router.get("/result/{video_id}")
-async def get_result(video_id: str):
+async def get_result(video_id: str) -> SignResultResponse:
     data = await RedisClient.client().get(f"sign:{video_id}")
     if not data:
         raise HTTPException(status_code=404, detail="video_id not found or expired")
-    return {"api_version": "v1", "video_id": video_id, **json.loads(data)}
+    return SignResultResponse(video_id=video_id, **json.loads(data))
 
 
 @router.post("/corrections")
