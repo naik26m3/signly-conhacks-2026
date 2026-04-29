@@ -4,6 +4,10 @@ dist/
 .vscode/
 .claude/
 .env
+.venv/
+__pycache__/
+*.pyc
+debug/
 backend/models/WLASL/videos/
 backend/models/breast_cancer.ipynb
 backend/models/mutemotion-wlasl-translation-model.ipynb

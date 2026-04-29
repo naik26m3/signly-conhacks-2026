@@ -4,6 +4,51 @@ FastAPI backend for ASL Bridge. See `docs/PLAN.md` for system architecture and A
 
 ---
 
+## Dev Setup (run without Docker)
+
+**Prerequisites:** Python 3.11+, Docker Desktop running (for databases only)
+
+**1. Start databases only (not the api container):**
+```bash
+docker compose up postgres redis seaweedfs-master seaweedfs-volume seaweedfs-filer -d
+```
+
+**2. Create and activate the virtual environment (first time only):**
+```bash
+cd backend
+python -m venv .venv
+
+# Windows (Git Bash / bash)
+source .venv/Scripts/activate
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+```
+
+**3. Install dependencies (first time only):**
+```bash
+pip install -r requirements.txt
+```
+
+**4. Run the server:**
+```bash
+python server.py
+# or: uvicorn main:app --reload --port 8000
+```
+
+API will be at `http://localhost:8000` — docs at `http://localhost:8000/docs`
+
+**Why `backend/.env` exists:**
+The root `.env` uses Docker-internal hostnames (`postgres`, `redis`, `seaweedfs-filer`).
+`backend/.env` overrides just those 3 URLs to `localhost` so uvicorn on your laptop can reach the DBs.
+Everything else (API keys etc.) still comes from the root `.env`.
+
+**Debug frames:**
+When a video is processed, the best hand-landmark frame is saved to `debug/frames/<video_id>.png`
+so you can see exactly what gets sent to Gemini.
+
+---
+
 ## File Structure
 
 ```
