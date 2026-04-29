@@ -9,11 +9,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_MIME_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
-MAGIC_BYTES = {
-    b"\x00\x00\x00\x18ftyp": "video/mp4",
-    b"\x00\x00\x00\x1cftyp": "video/mp4",
-    b"\x1a\x45\xdf\xa3": "video/webm",
-}
+WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
 
 async def validate(file: UploadFile) -> tuple[bool, str]:
     if file.content_type not in ALLOWED_MIME_TYPES:
@@ -22,8 +18,9 @@ async def validate(file: UploadFile) -> tuple[bool, str]:
     header = await file.read(32)
     await file.seek(0)
 
-    matched = any(header.startswith(magic) for magic in MAGIC_BYTES)
-    if not matched:
+    is_isobmff = len(header) >= 8 and header[4:8] == b"ftyp"
+    is_webm = header.startswith(WEBM_MAGIC)
+    if not (is_isobmff or is_webm):
         return False, "file content does not match a valid video format"
 
     return True, ""
