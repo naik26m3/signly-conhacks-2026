@@ -42,21 +42,64 @@ constants/
   theme.ts            — shared colours/spacing
 ```
 
-## How the sign recognition flow works
+## Communication modes
+
+| Mode | Who uses it | Flow |
+|------|-------------|------|
+| **Deaf Mode** | Deaf / ASL user | Records sign → backend recognises → returns gloss + english + **audio** → auto-plays audio so hearing person hears it |
+| **Hearing Mode** | Hearing person | Records voice → backend transcribes → returns transcript + ASL gloss → displayed as large readable text for deaf person |
+
+## How the sign recognition flow works (Deaf Mode)
 
 1. `CameraRecorder` records a clip → calls `onRecorded(uri)` with the local file URI.
-2. `index.tsx` switches to `VideoPreview`, passing the URI and the `upload` state.
-3. User taps **Recognise Sign** → `send(uri)` is called on `useVideoUpload`.
+2. `index.tsx` / `deaf.tsx` switches to `VideoPreview`, passing the URI and the `upload` state.
+3. User taps **Recognise Sign** → `send(uri)` is called on `useVideoUpload`, with `X-Session-ID` header.
 4. Hook uploads the video (`POST /api/v1/sign/recognize`) — backend returns `202 { video_id }` immediately.
 5. Hook polls `GET /api/v1/sign/result/{video_id}` every 1.5 s for up to 45 s.
-6. When `status === "done"`, `upload` becomes `{ kind: 'success', data: { gloss, english, confidence, landmarks_found } }`.
-7. `VideoPreview` renders the result panel with the gloss in large green text.
+6. When `status === "done"`, `upload` becomes `{ kind: 'success', data: { gloss, english, confidence, landmarks_found, audio_url } }`.
+7. Screen renders gloss (large) + english (smaller).
+8. **If `audio_url` is present, auto-play audio immediately** (hearing person hears the signed message spoken aloud). Show a replay button for on-demand replay.
 
 Upload state machine (from `use-video-upload.ts`):
 ```
 idle → uploading → processing → success
                               → error
 ```
+
+## How the speech transcription flow works (Hearing Mode)
+
+1. `use-record.ts` records mic audio via `expo-av`.
+2. On stop: `POST /api/v1/speech/transcribe` with the audio file.
+3. Backend returns `{ transcript, gloss }` — **no audio generated on this side** (hearing person already spoke).
+4. Screen displays transcript + gloss in large, deaf-readable text.
+
+## Audio playback
+
+Use `expo-av` `Audio.Sound` to play `audio_url` directly from SeaweedFS — no need to download:
+
+```ts
+import { Audio } from 'expo-av';
+
+const { sound } = await Audio.Sound.createAsync({ uri: audio_url });
+await sound.playAsync();
+// unload when done to free memory
+sound.setOnPlaybackStatusUpdate((s) => {
+  if (s.isLoaded && s.didJustFinish) sound.unloadAsync();
+});
+```
+
+## Session ID
+
+Each install generates a UUID once and persists it in `AsyncStorage` (see `lib/session.ts`). It is sent on every sign recognition request as the `X-Session-ID` header and used to fetch history.
+
+```ts
+import { getSessionId } from '@/lib/session';
+const sessionId = await getSessionId();
+```
+
+## History screen (`app/history.tsx`)
+
+Calls `GET /api/v1/history?session_id=<id>` and renders a flat list of past sign recognitions. Each item shows gloss, english, timestamp, and a play button that plays `audio_url` via `expo-av`.
 
 ## Adding a new screen
 

@@ -10,9 +10,10 @@ Expo React Native app for ASL Bridge. See `docs/PLAN.md` for system architecture
 frontend/
 ├── app/
 │   ├── _layout.tsx            # Root layout, navigation shell
-│   ├── index.tsx              # Current: record → preview → upload flow  ✓
-│   ├── deaf.tsx               # Deaf Mode screen  [ ]
-│   └── hearing.tsx            # Hearing Mode screen  [ ]
+│   ├── index.tsx              # Home: mode selector (Deaf / Hearing)  [ ]
+│   ├── deaf.tsx               # Deaf Mode: sign → text + audio playback  [ ]
+│   ├── hearing.tsx            # Hearing Mode: voice → transcript + gloss  [ ]
+│   └── history.tsx            # History: past recognitions with audio replay  [ ]
 ├── components/
 │   ├── camera-recorder.tsx    # CameraView + record/stop  ✓
 │   ├── video-preview.tsx      # VideoView + upload result panel  ✓
@@ -24,7 +25,8 @@ frontend/
 │   ├── use-video-upload.ts    # Upload state machine (idle/uploading/success/error)  ✓
 │   └── use-record.ts          # expo-av recording setup, start, stop, cleanup  [ ]
 ├── lib/
-│   └── api.ts                 # Typed API client + all endpoints  ✓
+│   ├── api.ts                 # Typed API client + all endpoints  ✓
+│   └── session.ts             # Generate + persist session UUID in AsyncStorage  [ ]
 └── app.json
 ```
 
@@ -52,9 +54,11 @@ API base URL comes from `EXPO_PUBLIC_API_URL` in `frontend/.env` (not `app.json`
 
 ### Deaf Mode (`app/deaf.tsx`)
 - [ ] Reuse `camera-recorder.tsx` for video capture
-- [ ] On stop: call `api.recognizeSign(videoUri)`
+- [ ] On stop: call `api.recognizeSign(videoUri, sessionId)` with `X-Session-ID` header
 - [ ] Show `confidence-badge` ("signing...") while in flight
 - [ ] On response: display `gloss` + `english` in `result-banner`
+- [ ] **If `audio_url` present: auto-play audio via `expo-av` so hearing person hears it**
+- [ ] Show replay (speaker) button for on-demand replay
 - [ ] `AbortController` on screen unmount
 
 ### Hearing Mode (`app/hearing.tsx`)
@@ -69,12 +73,24 @@ API base URL comes from `EXPO_PUBLIC_API_URL` in `frontend/.env` (not `app.json`
 - [ ] `result-banner.tsx` — gloss (large) + English (smaller) with fade-in animation
 - [ ] `confidence-badge.tsx` — "signing..." spinner vs confirmed label
 
+### History Screen (`app/history.tsx`)
+- [ ] On mount: load `session_id` from `lib/session.ts`
+- [ ] Call `api.getConversationMessages(sessionId)` → chat thread ordered oldest-first
+- [ ] Render chat bubbles: `deaf_to_hearing` on right, `hearing_to_deaf` on left
+- [ ] `deaf_to_hearing` bubble: gloss (bold) + english + speaker icon → `Audio.Sound.createAsync({ uri: item.audio_url })` → `playAsync()`
+- [ ] `hearing_to_deaf` bubble: transcript + gloss (smaller), no audio button
+- [ ] Unload sound on playback finish to free memory
+
+### Session utility (`lib/session.ts`)
+- [ ] `getSessionId()` — reads UUID from `AsyncStorage`, generates + saves on first call
+
 ### Hook
 - [ ] `hooks/use-record.ts` — wraps expo-av recording: `{ isRecording, startRecording, stopRecording, uri }`
 
 ### API endpoints to add to `lib/api.ts`
-- [ ] `recognizeSign(videoUri)` → POST `/api/v1/sign/recognize` → `{ gloss, english, confidence }`
-- [ ] `transcribeSpeech(audioUri)` → POST `/api/v1/speech/transcribe` → `{ transcript, gloss }`
+- [ ] `recognizeSign(videoUri, sessionId)` → POST `/api/v1/sign/recognize` (header `X-Session-ID`) → `{ gloss, english, confidence, audio_url }`
+- [ ] `transcribeSpeech(audioUri, sessionId)` → POST `/api/v1/speech/transcribe` (header `X-Session-ID`) → `{ transcript, gloss }`
+- [ ] `getConversationMessages(sessionId, limit?)` → GET `/api/v1/conversations/{sessionId}/messages` → `{ conversation_id, total, messages[] }`
 - [ ] Pass `AbortSignal` through to `request()` for cancellation
 
 ---
