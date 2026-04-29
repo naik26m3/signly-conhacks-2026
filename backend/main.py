@@ -1,3 +1,10 @@
+import os
+import sys
+
+# Make the project root importable so `from models.handTracking import HandTracker` works
+# regardless of whether uvicorn is run from backend/ or the project root.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,14 +14,19 @@ from config.database import Database
 from config.redis import RedisClient
 from middleware.request_logger import log_requests
 from routers import health, sign, speech, uploads
+from models.handTracking import HandTracker
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await Database.connect()
     await RedisClient.connect()
+    HandTracker.load()
     yield
+    HandTracker.unload()
     await Database.disconnect()
     await RedisClient.disconnect()
+
 
 app = FastAPI(
     title="Sign Bridge API",
