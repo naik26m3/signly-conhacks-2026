@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 
 import httpx
 from arq.connections import RedisSettings
@@ -73,6 +74,7 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
             os.unlink(tmp_path)
 
     if sign is None:
+        await redis.setex(f"sign:{video_id}", 3600, json.dumps({"status": "error", "detail": "Recognition failed"}))
         return
 
     gloss = sign["gloss"]
@@ -91,8 +93,7 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
 
     # Persist conversation + message
     try:
-        import uuid as _uuid
-        sid = _uuid.UUID(session_id) if session_id else _uuid.uuid4()
+        sid = uuid.UUID(session_id) if session_id else uuid.uuid4()
         async with db_session() as session:
             async with session.begin():
                 conv = await upsert_conversation(session, sid)
