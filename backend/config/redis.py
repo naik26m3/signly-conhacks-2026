@@ -1,12 +1,24 @@
-from redis.asyncio import from_url, Redis
+from redis.asyncio import ConnectionPool, Redis
 from config.settings import settings
 
-redis_client: Redis = None
+class RedisClient:
+    _pool: ConnectionPool = None
+    _client: Redis = None
 
-async def connect():
-    global redis_client
-    redis_client = await from_url(settings.redis_url, decode_responses=True)
+    @classmethod
+    async def connect(cls):
+        cls._pool = ConnectionPool.from_url(
+            settings.redis_url,
+            max_connections=20,
+            decode_responses=True,
+        )
+        cls._client = Redis(connection_pool=cls._pool)
 
-async def disconnect():
-    if redis_client:
-        await redis_client.aclose()
+    @classmethod
+    async def disconnect(cls):
+        if cls._client:
+            await cls._client.aclose()
+
+    @classmethod
+    def client(cls) -> Redis:
+        return cls._client

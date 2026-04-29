@@ -3,17 +3,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
-from config import database, redis
+from config.database import Database
+from config.redis import RedisClient
 from middleware.request_logger import log_requests
 from routers import health, sign, speech, uploads
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await database.connect()
-    await redis.connect()
+    await Database.connect()
+    await RedisClient.connect()
     yield
-    await database.disconnect()
-    await redis.disconnect()
+    await Database.disconnect()
+    await RedisClient.disconnect()
 
 app = FastAPI(
     title="Sign Bridge API",
