@@ -174,12 +174,21 @@ The ARQ worker (`worker.py`) runs as a separate process:
 ```
 process_sign_video(video_id, content_type, session_id):
   1. Download video from SeaweedFS
-  2. HandTracker.process_video() → best frame (base64) + landmarks_found
-  3. Gemini → { gloss, english, confidence }
-  4. ElevenLabs TTS(english) → audio_bytes
-  5. save_bytes(audio_bytes, video_id, folder="audio", ext="mp3") → audio_url
-  6. upsert_conversation(session_id) + insert_message(deaf_to_hearing)
-  7. Write Redis result: { status, gloss, english, confidence, landmarks_found, audio_url }
+  2. Write to temp file
+  3. HandTracker.process_video() [VIDEO mode] → landmark_sequence + landmarks_found
+  4. If not landmarks_found:
+       write Redis { status: "done", gloss: "NO_HAND", english: "No hand detected — try again", confidence: 0.0 }
+       return  ← no Gemini call, no TTS, no DB insert
+  5. inference.recognize_sign(tmp_path, landmark_sequence)
+       → upload video to Gemini Files API
+       → generate_content(video + landmark JSON prompt)
+       → delete file from Gemini Files API
+       → { gloss, english, confidence }
+  6. delete temp file
+  7. ElevenLabs TTS(english) → audio_bytes
+  8. save_bytes(audio_bytes, video_id, folder="audio", ext="mp3") → audio_url
+  9. upsert_conversation(session_id) + insert_message(deaf_to_hearing)
+  10. Write Redis result: { status, gloss, english, confidence, landmarks_found, audio_url }
 ```
 
 ---
@@ -225,6 +234,6 @@ Two tables — `conversations` (one per session) and `messages` (many per conver
 ## What's Left [ ]
 
 - [ ] Auth (user accounts) — `user_id` column on `conversations` is ready, just needs a users table + JWT middleware
-- [ ] Video optimization — send short video + landmark motion data directly to Gemini (replaces single-frame approach)
+- [x] Video optimization — HandTracker VIDEO mode + landmark sequence + Gemini Files API (replaces single-frame approach)
 - [ ] Run `alembic upgrade head` in CI / Docker entrypoint
 - [ ] Wire tests into Docker Compose for CI
