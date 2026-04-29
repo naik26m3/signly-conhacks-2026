@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import type { UploadResult } from '@/hooks/use-video-upload';
 
@@ -31,34 +31,25 @@ export function VideoPreview({ uri, upload, onSend, onCancel, onReset }: Props) 
 
       <View style={styles.actions}>
         {isFinished ? (
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => {
-              player.pause();
-              onReset();
-            }}
-          >
+          <TouchableOpacity style={styles.cancelButton} onPress={() => { player.pause(); onReset(); }}>
             <Text style={styles.buttonText}>Record Again</Text>
           </TouchableOpacity>
         ) : (
           <>
             <TouchableOpacity
               style={styles.cancelButton}
-              onPress={() => {
-                player.pause();
-                onCancel();
-              }}
+              onPress={() => { player.pause(); onCancel(); }}
               disabled={upload.kind === 'uploading'}
             >
               <Text style={styles.buttonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.saveButton, upload.kind === 'uploading' && styles.disabled]}
+              style={[styles.sendButton, upload.kind === 'uploading' && styles.disabled]}
               onPress={onSend}
               disabled={upload.kind === 'uploading'}
             >
               <Text style={styles.buttonText}>
-                {upload.kind === 'uploading' ? 'Sending…' : 'Send to API'}
+                {upload.kind === 'uploading' ? 'Analysing…' : 'Recognise Sign'}
               </Text>
             </TouchableOpacity>
           </>
@@ -69,40 +60,39 @@ export function VideoPreview({ uri, upload, onSend, onCancel, onReset }: Props) 
 }
 
 function ResultPanel({ upload }: { upload: UploadResult }) {
-  return (
-    <View style={styles.resultPanel}>
-      {upload.kind === 'uploading' && (
-        <View style={styles.resultRow}>
-          <ActivityIndicator color="#fff" />
-          <Text style={styles.resultTitle}>  Uploading…</Text>
-        </View>
-      )}
+  if (upload.kind === 'uploading') {
+    return (
+      <View style={styles.panel}>
+        <ActivityIndicator color="#fff" size="large" />
+        <Text style={styles.label}>Processing hand gesture…</Text>
+      </View>
+    );
+  }
 
-      {upload.kind === 'success' && (
-        <ScrollView style={styles.resultScroll}>
-          <Text style={[styles.resultTitle, { color: '#7CFC8A' }]}>
-            ✓ Upload OK ({upload.status})
-          </Text>
-          {upload.data?.video_id && (
-            <Text style={styles.resultLine}>video_id: {upload.data.video_id}</Text>
-          )}
-          {upload.data?.status && (
-            <Text style={styles.resultLine}>status: {upload.data.status}</Text>
-          )}
-          <Text style={styles.resultMono}>{JSON.stringify(upload.data, null, 2)}</Text>
-        </ScrollView>
-      )}
+  if (upload.kind === 'success') {
+    const { gloss, english, confidence, landmarks_found } = upload.data;
+    const pct = Math.round(confidence * 100);
+    return (
+      <View style={styles.panel}>
+        <Text style={styles.gloss}>{gloss}</Text>
+        {english ? <Text style={styles.english}>{english}</Text> : null}
+        <Text style={styles.meta}>
+          {pct}% confidence{!landmarks_found ? ' · no landmarks detected' : ''}
+        </Text>
+      </View>
+    );
+  }
 
-      {upload.kind === 'error' && (
-        <ScrollView style={styles.resultScroll}>
-          <Text style={[styles.resultTitle, { color: '#FF6B6B' }]}>
-            ✗ Upload failed{upload.status ? ` (${upload.status})` : ''}
-          </Text>
-          <Text style={styles.resultMono}>{upload.message}</Text>
-        </ScrollView>
-      )}
-    </View>
-  );
+  if (upload.kind === 'error') {
+    return (
+      <View style={[styles.panel, styles.errorPanel]}>
+        <Text style={styles.errorTitle}>Recognition failed</Text>
+        <Text style={styles.errorBody}>{upload.message}</Text>
+      </View>
+    );
+  }
+
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -116,27 +106,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-evenly',
   },
   buttonText: { color: 'white', textAlign: 'center', fontWeight: 'bold' },
-  cancelButton: { backgroundColor: 'rgba(255,0,0,0.7)', padding: 15, borderRadius: 30, width: 120 },
-  saveButton: { backgroundColor: 'rgba(0,255,0,0.7)', padding: 15, borderRadius: 30, width: 120 },
+  cancelButton: { backgroundColor: 'rgba(255,0,0,0.7)', padding: 15, borderRadius: 30, width: 130 },
+  sendButton:   { backgroundColor: 'rgba(0,180,80,0.85)', padding: 15, borderRadius: 30, width: 150 },
   disabled: { opacity: 0.5 },
-  resultPanel: {
+
+  panel: {
     position: 'absolute',
     top: 60,
     left: 16,
     right: 16,
-    maxHeight: '50%',
-    backgroundColor: 'rgba(0,0,0,0.78)',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
   },
-  resultRow: { flexDirection: 'row', alignItems: 'center' },
-  resultScroll: { maxHeight: 280 },
-  resultTitle: { color: 'white', fontSize: 16, fontWeight: 'bold', marginBottom: 6 },
-  resultLine: { color: 'white', fontSize: 13, marginBottom: 2 },
-  resultMono: {
-    color: '#D8E0FF',
-    fontSize: 11,
-    fontFamily: 'Courier',
-    marginTop: 6,
-  },
+  label:    { color: '#ccc', marginTop: 10, fontSize: 14 },
+  gloss:    { color: '#7CFC8A', fontSize: 42, fontWeight: 'bold', letterSpacing: 2 },
+  english:  { color: 'white', fontSize: 22, marginTop: 6 },
+  meta:     { color: '#aaa', fontSize: 12, marginTop: 8 },
+
+  errorPanel: { borderWidth: 1, borderColor: '#FF6B6B' },
+  errorTitle: { color: '#FF6B6B', fontSize: 16, fontWeight: 'bold' },
+  errorBody:  { color: '#eee', fontSize: 12, marginTop: 6, textAlign: 'center' },
 });

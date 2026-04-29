@@ -5,8 +5,12 @@ services:
       - "18000:8000"
     env_file:
       - .env
+    environment:
+      - PYTHONPATH=/
     volumes:
       - ./backend:/app
+      - ./models:/models
+      - ./debug:/debug
     depends_on:
       - postgres
       - redis

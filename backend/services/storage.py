@@ -28,17 +28,22 @@ async def validate(file: UploadFile) -> tuple[bool, str]:
 async def save(file: UploadFile) -> dict:
     video_id = str(uuid.uuid4())
     contents = await file.read()
-
     if len(contents) > MAX_FILE_SIZE:
-        raise ValueError(f"file exceeds 50MB limit")
+        raise ValueError("file exceeds 50MB limit")
+    return await save_bytes(contents, video_id, file.content_type or "video/mp4")
+
+
+async def save_bytes(contents: bytes, video_id: str, content_type: str = "video/mp4") -> dict:
+    if len(contents) > MAX_FILE_SIZE:
+        raise ValueError("file exceeds 50MB limit")
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{settings.seaweedfs_filer_url}/videos/{video_id}.mp4",
-            files={"file": (f"{video_id}.mp4", contents, file.content_type)},
+            files={"file": (f"{video_id}.mp4", contents, content_type)},
         )
         response.raise_for_status()
 
     url = f"{settings.seaweedfs_filer_url}/videos/{video_id}.mp4"
-    logger.info(f"saved video {video_id} to seaweedfs")
+    logger.info("saved video %s to seaweedfs", video_id)
     return {"video_id": video_id, "url": url}

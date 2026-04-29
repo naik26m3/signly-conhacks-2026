@@ -54,14 +54,17 @@ export const api = {
 
 // ── endpoints ─────────────────────────────────────────────────────────────
 
-export type UploadVideoResponse = {
+export type RecognizeResponse = {
   api_version: string;
   video_id: string;
-  status: string;
+  gloss: string;
+  english: string;
+  confidence: number;
+  landmarks_found: boolean;
 };
 
-export function uploadVideo(uri: string) {
+export function recognizeSign(uri: string) {
   const formData = new FormData();
-  formData.append('file', { uri, type: 'video/mp4', name: 'upload.mp4' } as any);
-  return api.post<UploadVideoResponse>('/api/v1/uploads/video', formData);
+  formData.append('file', { uri, type: 'video/mp4', name: 'sign.mp4' } as any);
+  return api.post<RecognizeResponse>('/api/v1/sign/recognize', formData);
 }
