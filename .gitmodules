@@ -7,3 +7,6 @@
 [submodule "skills/fastapi"]
 	path = skills/fastapi
 	url = https://github.com/tiangolo/fastapi
+[submodule "skills/huggingface-skills"]
+	path = skills/huggingface-skills
+	url = https://github.com/huggingface/skills
