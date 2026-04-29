@@ -17,7 +17,7 @@ class SpeechService:
             return ""
         result = await asyncio.to_thread(
             self._client.speech_to_text.convert,
-            audio=io.BytesIO(audio_bytes),
+            file=io.BytesIO(audio_bytes),
             model_id="scribe_v1",
         )
         text = result.text if hasattr(result, "text") else str(result)
