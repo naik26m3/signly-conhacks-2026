@@ -56,7 +56,7 @@ class InferenceService:
         generation = (
             trace.generation(
                 name="gemini-recognize",
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 input={"video_path": video_path, "landmark_frames": len(landmark_sequence)},
             )
             if trace
@@ -72,7 +72,7 @@ class InferenceService:
             logger.info("recognize_sign: uploaded %s → %s", video_path, uploaded.name)
 
             response = await self._gemini.aio.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=[
                     types.Part.from_uri(file_uri=uploaded.uri, mime_type="video/mp4"),
                     prompt,
@@ -118,7 +118,7 @@ class InferenceService:
         if not self._gemini:
             return gloss
         response = await self._gemini.aio.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=[_GLOSS_TO_ENGLISH_PROMPT.format(gloss=gloss)],
         )
         return response.text.strip()
@@ -127,7 +127,7 @@ class InferenceService:
         if not self._gemini:
             return text.upper()
         response = await self._gemini.aio.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=[_ENGLISH_TO_GLOSS_PROMPT.format(text=text)],
         )
         return response.text.strip()

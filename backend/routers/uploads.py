@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from config.redis import RedisClient
-from schemas.upload import UploadTextResponse, UploadVideoResponse
+from schemas.upload import UploadVideoResponse
 from services.storage import validate, save
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,3 @@ async def upload_video(file: Annotated[UploadFile, File()]) -> UploadVideoRespon
     )
 
     return UploadVideoResponse(video_id=result["file_id"])
-
-
-@router.post("/text")
-async def upload_text() -> UploadTextResponse:
-    return UploadTextResponse(message="not implemented")
