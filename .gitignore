@@ -2,3 +2,9 @@ node_modules/
 .expo/
 dist/
 .vscode/
+backend/models/WLASL/videos/
+backend/models/breast_cancer.ipynb
+backend/models/mutemotion-wlasl-translation-model.ipynb
+*.zip
+*.txt
+*.json
