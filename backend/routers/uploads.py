@@ -1,14 +1,19 @@
 import json
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+
 from config.redis import RedisClient
+from schemas.upload import UploadTextResponse, UploadVideoResponse
 from services.storage import validate, save
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
 
+
 @router.post("/video")
-async def upload_video(file: UploadFile = File(...)):
+async def upload_video(file: Annotated[UploadFile, File()]) -> UploadVideoResponse:
     valid, reason = await validate(file)
     if not valid:
         raise HTTPException(status_code=400, detail=reason)
@@ -22,17 +27,14 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="upload failed")
 
     await RedisClient.client().setex(
-        f"upload:{result['video_id']}",
+        f"upload:{result['file_id']}",
         3600,
         json.dumps({"url": result["url"], "status": "ready"}),
     )
 
-    return {
-        "api_version": "v1",
-        "video_id": result["video_id"],
-        "status": "ready",
-    }
+    return UploadVideoResponse(video_id=result["file_id"])
+
 
 @router.post("/text")
-async def upload_text():
-    return {"api_version": "v1", "message": "not implemented"}
+async def upload_text() -> UploadTextResponse:
+    return UploadTextResponse(message="not implemented")
