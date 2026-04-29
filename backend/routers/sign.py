@@ -1,21 +1,29 @@
-import asyncio
 import json
 import logging
-import os
-import tempfile
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from arq import create_pool
+from arq.connections import RedisSettings
 
 from config.redis import RedisClient
-from models.handTracking import HandTracker
-from services import inference, storage
+from config.settings import settings
+from schemas.sign import CorrectionRequest, CorrectionResponse, CorrectionsListResponse
+from services import storage
+from services.collector import collector
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/sign", tags=["sign"])
 
+_CORRECTIONS_FILE = Path(__file__).parent.parent / "data" / "raw" / "corrections.jsonl"
 
-@router.post("/recognize")
+
+async def _get_arq():
+    return await create_pool(RedisSettings.from_dsn(settings.redis_url))
+
+
+@router.post("/recognize", status_code=202)
 async def recognize(file: UploadFile = File(...)):
     valid, reason = await storage.validate(file)
     if not valid:
@@ -24,53 +32,55 @@ async def recognize(file: UploadFile = File(...)):
     video_id = str(uuid.uuid4())
     contents = await file.read()
 
-    # Write to temp file so OpenCV can read it
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-        tmp.write(contents)
-        tmp_path = tmp.name
-
-    try:
-        loop = asyncio.get_event_loop()
-        frame_b64, landmarks_found = await loop.run_in_executor(
-            None, HandTracker.process_video, tmp_path, video_id
-        )
-    finally:
-        os.unlink(tmp_path)
-
-    if not frame_b64:
-        raise HTTPException(status_code=422, detail="Could not extract any frames from video")
-
-    # Send best frame to Gemini
-    result = await inference.recognize_sign(frame_b64)
-
-    # Save original video to SeaweedFS for dataset logging (best-effort)
+    # Save video to SeaweedFS first — worker will download it
     try:
         await storage.save_bytes(contents, video_id, file.content_type or "video/mp4")
     except Exception:
-        logger.warning("SeaweedFS save failed — continuing without storage", exc_info=True)
+        logger.error("SeaweedFS save failed for video_id=%s", video_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to store video")
 
-    # Cache result in Redis
+    # Mark as queued in Redis
     await RedisClient.client().setex(
-        f"sign:{video_id}",
-        3600,
-        json.dumps({**result, "video_id": video_id, "landmarks_found": landmarks_found}),
+        f"sign:{video_id}", 3600, json.dumps({"status": "processing"})
     )
 
-    return {
-        "api_version": "v1",
-        "video_id": video_id,
-        "gloss": result["gloss"],
-        "english": result["english"],
-        "confidence": result["confidence"],
-        "landmarks_found": landmarks_found,
-    }
+    # Enqueue ARQ job
+    arq = await _get_arq()
+    await arq.enqueue_job("process_sign_video", video_id, file.content_type or "video/mp4")
+    await arq.aclose()
+
+    return {"api_version": "v1", "video_id": video_id, "status": "processing"}
+
+
+@router.get("/result/{video_id}")
+async def get_result(video_id: str):
+    data = await RedisClient.client().get(f"sign:{video_id}")
+    if not data:
+        raise HTTPException(status_code=404, detail="video_id not found or expired")
+    return {"api_version": "v1", "video_id": video_id, **json.loads(data)}
 
 
 @router.post("/corrections")
-async def create_correction():
-    return {"api_version": "v1", "message": "not implemented"}
+async def create_correction(body: CorrectionRequest) -> CorrectionResponse:
+    correction_id = await collector.log_correction(
+        video_id=body.video_id,
+        correct_gloss=body.correct_gloss,
+        notes=body.notes,
+    )
+    return CorrectionResponse(id=correction_id)
 
 
 @router.get("/corrections")
-async def list_corrections():
-    return {"api_version": "v1", "message": "not implemented"}
+async def list_corrections() -> CorrectionsListResponse:
+    if not _CORRECTIONS_FILE.exists():
+        return CorrectionsListResponse(total=0, recent=[])
+    records: list[dict] = []
+    try:
+        for line in _CORRECTIONS_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    except Exception:
+        logger.warning("Could not read corrections file", exc_info=True)
+        return CorrectionsListResponse(total=0, recent=[])
+    return CorrectionsListResponse(total=len(records), recent=records[-20:])
