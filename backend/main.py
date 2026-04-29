@@ -1,16 +1,9 @@
-import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
 from middleware.request_logger import log_requests
 from routers import health, sign, speech, uploads
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 
 app = FastAPI(
     title="Sign Bridge API",
