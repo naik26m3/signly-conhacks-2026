@@ -2,7 +2,7 @@ services:
   api:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "18000:8000"
     env_file:
       - .env
     volumes:
@@ -55,7 +55,7 @@ services:
     image: chrislusf/seaweedfs
     command: filer -master=seaweedfs-master:9333
     ports:
-      - "8888:8888"
+      - "18888:8888"
     depends_on:
       - seaweedfs-master
       - seaweedfs-volume
