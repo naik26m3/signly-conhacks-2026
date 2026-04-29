@@ -2,6 +2,7 @@ node_modules/
 .expo/
 dist/
 .vscode/
+.claude/
 .env
 backend/models/WLASL/videos/
 backend/models/breast_cancer.ipynb
