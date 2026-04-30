@@ -13,11 +13,13 @@ router = APIRouter(prefix="/api/v1/speech", tags=["speech"])
 
 _ALLOWED_AUDIO_TYPES = {
     "audio/m4a",
+    "audio/x-m4a",
     "audio/mp4",
     "audio/mpeg",
     "audio/mp3",
     "audio/wav",
     "audio/webm",
+    "audio/aac",
 }
 
 
@@ -27,13 +29,15 @@ async def transcribe(
     file: Annotated[UploadFile, File()],
     x_session_id: Annotated[str | None, Header()] = None,
 ) -> TranscribeResponse:
-    if file.content_type not in _ALLOWED_AUDIO_TYPES:
-        raise HTTPException(status_code=400, detail=f"unsupported audio format: {file.content_type}")
+    ct = file.content_type or "audio/m4a"
+    logger.info("transcribe: received content_type=%s filename=%s", ct, file.filename)
+    if not ct.startswith("audio/"):
+        raise HTTPException(status_code=400, detail=f"unsupported audio format: {ct}")
 
     contents = await file.read()
-    logger.info("transcribe endpoint: %d bytes, content_type=%s", len(contents), file.content_type)
+    logger.info("transcribe: %d bytes content_type=%s", len(contents), ct)
 
-    transcript = await request.app.state.speech.transcribe(contents, file.content_type or "audio/m4a")
+    transcript = await request.app.state.speech.transcribe(contents, ct)
 
     if transcript:
         try:

@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     # AI models
     gemini_api_key: str = ""
     elevenlabs_api_key: str = ""
+    # ElevenLabs voice ID — find yours at elevenlabs.io/app/voice-lab
+    # Default: "Rachel" (widely available on free plans)
+    elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
 
     # Langfuse LLM observability (optional — leave blank to disable)
     langfuse_public_key: str = ""

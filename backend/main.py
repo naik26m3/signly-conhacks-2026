@@ -10,7 +10,7 @@ from config.gemini import GeminiClient
 from config.elevenlabs import ElevenLabsClient
 from config.langfuse import LangfuseClient
 from middleware.request_logger import log_requests
-from models.handTracking import HandTracker
+from models.handTracking import FaceTracker, HandTracker
 from routers import conversations, health, sign, speech, uploads
 from services.inference import InferenceService
 from services.speech import SpeechService
@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
     await Database.connect()
     await RedisClient.connect()
     HandTracker.load()
+    FaceTracker.load()
     # AI clients (created in config, passed to services)
     gemini = GeminiClient.connect()
     elevenlabs = ElevenLabsClient.connect()
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     app.state.speech = SpeechService(elevenlabs=elevenlabs)
     yield
     HandTracker.unload()
+    FaceTracker.unload()
     await Database.disconnect()
     await RedisClient.disconnect()
 

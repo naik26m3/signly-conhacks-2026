@@ -39,7 +39,20 @@
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Signly needs camera access to record your signs.",
+          "microphonePermission": "Signly needs microphone access to record video."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Signly needs microphone access to transcribe your speech."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
