@@ -80,7 +80,7 @@ function ResultPanel({ upload }: { upload: UploadResult }) {
 
   if (upload.kind === 'success') {
     const { gloss, english, confidence, landmarks_found } = upload.data;
-    const pct = Math.round(confidence * 100);
+    const pct = confidence == null ? null : Math.round(confidence * 100);
     return (
       <View style={styles.panel}>
         <Text style={styles.gloss}>{gloss}</Text>

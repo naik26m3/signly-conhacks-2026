@@ -11,6 +11,23 @@ def _make_inference_service():
     return InferenceService(gemini=mock_gemini), mock_gemini
 
 
+def test_classifier_input_matches_exported_notebook_shape():
+    """Local ONNX classifier expects (batch, 15 frames, 126 hand xyz features)."""
+    from services.inference import InferenceService
+
+    service = InferenceService(gemini=None)
+    right = [[0.1, 0.2, 0.3]] * 21
+    left = [[0.4, 0.5, 0.6]] * 21
+
+    tensor = service._build_classifier_input([{"frame": 0, "right": right, "left": left}])
+
+    assert tensor.shape == (1, 15, 126)
+    assert tensor.dtype.name == "float32"
+    assert tensor[0, 0, 0:3].tolist() == pytest.approx([0.1, 0.2, 0.3])
+    assert tensor[0, 0, 63:66].tolist() == pytest.approx([0.4, 0.5, 0.6])
+    assert tensor[0, 1].sum() == 0.0
+
+
 @pytest.mark.asyncio
 async def test_recognize_sign_uploads_and_deletes_file():
     """recognize_sign uploads video to Files API and deletes it after."""

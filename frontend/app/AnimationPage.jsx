@@ -1,8 +1,17 @@
-import { useSpeechUpload } from '@/hooks/use-speech-upload';
+// Credit to https://sign.mt/
+
+import { HistoryDrawer } from '@/components/history-drawer';
+import { VoicePickerModal } from '@/components/voice-picker-modal';
+import { useSessionScope } from '@/contexts/SessionContext';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import * as Speech from 'expo-speech';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Platform,
     StyleSheet,
     Text,
     TextInput,
@@ -82,47 +91,98 @@ const HIDE_CHROME_JS = `
 `;
 
 export default function AnimationPage({ onNavigateTo }) {
+    const {
+        activeConversation,
+        addMessage,
+        newConversation,
+        selectConversation,
+        selectedVoice,
+    } = useSessionScope('animation');
+
     const [inputText, setInputText] = useState('');
     const [submittedText, setSubmittedText] = useState('');
     const [webviewLoading, setWebviewLoading] = useState(false);
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const [voicePickerOpen, setVoicePickerOpen] = useState(false);
     const webviewRef = useRef(null);
 
-    const { isRecording, isProcessing: processingMic, start: startMic, stop: stopMic } = useSpeechUpload();
-
     const url = useMemo(() => buildSignMtUrl(submittedText), [submittedText]);
+    const title = activeConversation?.title && activeConversation.title !== 'New conversation'
+        ? activeConversation.title
+        : 'Animation';
+    const latestConversationText = useMemo(() => {
+        const animationMessages = activeConversation?.messages
+            ?.filter((m) => m.kind === 'animation' && m.text) || [];
+        return animationMessages[animationMessages.length - 1]?.text || '';
+    }, [activeConversation?.messages]);
+
+    useEffect(() => {
+        setSubmittedText(latestConversationText);
+        setInputText(latestConversationText);
+        Speech.stop();
+    }, [activeConversation?.id, latestConversationText]);
 
     const handleSend = useCallback(() => {
         const t = inputText.trim();
         if (!t) return;
+        addMessage({ kind: 'animation', text: t });
         setSubmittedText(t);
-    }, [inputText]);
+        Keyboard.dismiss();
+    }, [inputText, addMessage]);
 
-    const handleMicPress = useCallback(async () => {
-        if (isRecording) {
-            const result = await stopMic();
-            if (result?.transcript) {
-                setInputText(result.transcript);
-                setSubmittedText(result.transcript);
-            }
-        } else {
-            await startMic();
-        }
-    }, [isRecording, startMic, stopMic]);
+    const handleNewConversation = useCallback(() => {
+        newConversation();
+        setInputText('');
+        setSubmittedText('');
+        Speech.stop();
+    }, [newConversation]);
+
+    const handleSelectConversation = useCallback((id) => {
+        selectConversation(id);
+        Speech.stop();
+    }, [selectConversation]);
 
     const hasContent = !!submittedText;
 
     return (
-        <View style={styles.screen}>
+        <KeyboardAvoidingView
+            style={styles.screen}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+        >
             <View style={styles.header}>
-                <Text style={styles.title}>Animation</Text>
-                <Text style={styles.subtitle}>Powered by sign.mt</Text>
+                <TouchableOpacity
+                    style={styles.headerIconBtn}
+                    onPress={() => setDrawerOpen(true)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                    <MaterialCommunityIcons name="menu" size={22} color="#2c2c2e" />
+                </TouchableOpacity>
+                <View style={styles.headerCenter}>
+                    <Text style={styles.title} numberOfLines={1}>{title}</Text>
+                    <Text style={styles.subtitle} numberOfLines={1}>
+                        {selectedVoice ? `Read-aloud: ${selectedVoice.name}` : 'Powered by sign.mt'}
+                    </Text>
+                </View>
+                <TouchableOpacity
+                    style={styles.headerIconBtn}
+                    onPress={() => setVoicePickerOpen(true)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                    <MaterialCommunityIcons name="account-voice" size={20} color="#2c2c2e" />
+                </TouchableOpacity>
             </View>
 
             {/* WebView area */}
             <View style={styles.webviewWrap}>
+                <View style={styles.creditBadge} pointerEvents="none">
+                    <Text style={styles.creditText}>avatar by sign.mt</Text>
+                </View>
                 {!hasContent ? (
                     <View style={styles.emptyState}>
-                        <Text style={styles.emptyEmoji}>🤟</Text>
+                        <View style={styles.emptyIconBadge}>
+                            <MaterialCommunityIcons name="hand-wave-outline" size={48} color="#432818" />
+                        </View>
                         <Text style={styles.emptyText}>Type or speak to see{'\n'}the ASL avatar sign it</Text>
                     </View>
                 ) : (
@@ -167,7 +227,6 @@ export default function AnimationPage({ onNavigateTo }) {
                             placeholderTextColor="#a09880"
                             returnKeyType="send"
                             onSubmitEditing={handleSend}
-                            editable={!processingMic}
                         />
                         <TouchableOpacity
                             style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
@@ -178,38 +237,42 @@ export default function AnimationPage({ onNavigateTo }) {
                         </TouchableOpacity>
                     </View>
 
-                    <TouchableOpacity
-                        style={[
-                            styles.fabMic,
-                            isRecording && styles.fabMicRecording,
-                            processingMic && styles.fabDisabled,
-                        ]}
-                        onPress={handleMicPress}
-                    >
-                        {processingMic
-                            ? <ActivityIndicator size="small" color="#fff" />
-                            : <MaterialCommunityIcons
-                                name={isRecording ? 'stop' : 'microphone'}
-                                size={18}
-                                color="#ffffff"
-                              />
-                        }
-                    </TouchableOpacity>
                 </View>
             </View>
 
             {/* Nav bar */}
             <View style={styles.navBar}>
                 <TouchableOpacity style={styles.navItem} onPress={() => onNavigateTo('translate')}>
-                    <MaterialIcons name="translate" size={18} color="#817f74" />
+                    <Image
+                        source={require('../assets/images/signly-logo.png')}
+                        style={{ width: 18, height: 18, tintColor: '#817f74' }}
+                        resizeMode="contain"
+                    />
                     <Text style={styles.navLabelInactive}>Translate</Text>
                 </TouchableOpacity>
                 <View style={[styles.navItem, styles.navItemActive]}>
                     <MaterialCommunityIcons name="hand-wave" size={18} color="#FDF0D0" />
                     <Text style={styles.navLabelActive}>Animation</Text>
                 </View>
+                <TouchableOpacity style={styles.navItem} onPress={() => onNavigateTo('voice')}>
+                    <MaterialCommunityIcons name="account-voice" size={18} color="#817f74" />
+                    <Text style={styles.navLabelInactive}>Voice</Text>
+                </TouchableOpacity>
             </View>
-        </View>
+
+            <HistoryDrawer
+                visible={drawerOpen}
+                onClose={() => setDrawerOpen(false)}
+                onOpenVoicePicker={() => setVoicePickerOpen(true)}
+                pageType="animation"
+                onSelectConversation={handleSelectConversation}
+                onNewConversation={handleNewConversation}
+            />
+            <VoicePickerModal
+                visible={voicePickerOpen}
+                onClose={() => setVoicePickerOpen(false)}
+            />
+        </KeyboardAvoidingView>
     );
 }
 
@@ -222,8 +285,18 @@ const styles = StyleSheet.create({
         width: '100%',
         paddingTop: 60,
         paddingBottom: 8,
+        paddingHorizontal: 12,
+        flexDirection: 'row',
         alignItems: 'center',
     },
+    headerIconBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerCenter: { flex: 1, alignItems: 'center' },
     title: {
         color: '#2c2c2e',
         fontSize: 22,
@@ -265,14 +338,40 @@ const styles = StyleSheet.create({
         top: 12,
         right: 12,
     },
+    creditBadge: {
+        position: 'absolute',
+        bottom: 8,
+        right: 10,
+        zIndex: 10,
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.72)',
+    },
+    creditText: {
+        fontSize: 10,
+        color: '#a09880',
+    },
     emptyState: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 12,
+        gap: 16,
     },
-    emptyEmoji: {
-        fontSize: 64,
+    emptyIconBadge: {
+        width: 96,
+        height: 96,
+        borderRadius: 48,
+        backgroundColor: '#FDF0D0',
+        borderWidth: 1,
+        borderColor: '#e0d8cc',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#432818',
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 2,
     },
     emptyText: {
         color: '#a09880',
@@ -321,22 +420,6 @@ const styles = StyleSheet.create({
     sendBtnDisabled: {
         opacity: 0.4,
     },
-    fabMic: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#3d2c22',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    fabMicRecording: {
-        backgroundColor: '#c0392b',
-        shadowColor: '#e74c3c',
-    },
-    fabDisabled: {
-        opacity: 0.6,
-    },
-
     // ── nav bar ──
     navBar: {
         width: '94%',
@@ -345,7 +428,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.55)',
         borderRadius: 50,
         paddingVertical: 12,
-        paddingHorizontal: 14,
+        paddingHorizontal: 10,
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',

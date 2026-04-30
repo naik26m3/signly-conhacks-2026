@@ -157,8 +157,6 @@ export function CameraRecorder({ onRecorded, onCancel }: Props) {
     if (newFacing === 'front' && flashOn) {
       setFlashOn(false);
     }
-    cameraReadyRef.current = false;
-    setIsCameraReady(false);
     setFacing(newFacing);
   };
 

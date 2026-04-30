@@ -41,3 +41,50 @@ class SpeechService:
         audio = b"".join(chunks) if hasattr(chunks, "__iter__") else chunks
         logger.info("synthesize: %d chars → %d bytes (ElevenLabs)", len(text), len(audio))
         return audio
+
+    async def design_voice(self, *, voice_description: str, text: str) -> tuple[str, str]:
+        """Generate a brand-new voice from a free-form description and return (audio_b64, mime).
+
+        Uses ElevenLabs Voice Design (text_to_voice.design) which already returns
+        base64-encoded audio in its response — no need for us to encode bytes ourselves.
+        Picks the first preview from the response.
+        """
+        if not self._client:
+            raise RuntimeError("ElevenLabs not configured — cannot design voice")
+
+        def _run():
+            return self._client.text_to_voice.design(
+                voice_description=voice_description,
+                text=text,
+            )
+
+        result = await asyncio.to_thread(_run)
+        if not result.previews:
+            raise RuntimeError("ElevenLabs returned no voice previews")
+        first = result.previews[0]
+        logger.info(
+            "design_voice: desc=%dch text=%dch → preview generated_voice_id=%s duration=%.2fs",
+            len(voice_description), len(text), first.generated_voice_id, first.duration_secs,
+        )
+        return first.audio_base_64, first.media_type
+
+    async def speak_designed_voice(self, *, voice_description: str, text: str) -> tuple[str, str]:
+        """Generate speech for arbitrary text using a previously designed voice description."""
+        if not self._client:
+            raise RuntimeError("ElevenLabs not configured — cannot speak with designed voice")
+
+        def _run():
+            return self._client.text_to_voice.design(
+                voice_description=voice_description,
+                text=text,
+            )
+
+        result = await asyncio.to_thread(_run)
+        if not result.previews:
+            raise RuntimeError("ElevenLabs returned no voice previews")
+        first = result.previews[0]
+        logger.info(
+            "speak_designed_voice: desc=%dch text=%dch → audio generated",
+            len(voice_description), len(text),
+        )
+        return first.audio_base_64, first.media_type

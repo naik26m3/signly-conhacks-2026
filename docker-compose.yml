@@ -10,7 +10,6 @@ services:
     volumes:
       - ./backend:/app
       - ./models:/models
-      - ./debug:/debug
     depends_on:
       - postgres
       - redis
@@ -75,7 +74,6 @@ services:
     volumes:
       - ./backend:/app
       - ./models:/models
-      - ./debug:/debug
     depends_on:
       - redis
       - seaweedfs-filer

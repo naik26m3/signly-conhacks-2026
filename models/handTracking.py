@@ -10,17 +10,6 @@ logger = logging.getLogger(__name__)
 
 _MODEL_PATH = Path(__file__).parent / "hand_landmarker.task"
 _FACE_MODEL_PATH = Path(__file__).parent / "face_landmarker.task"
-_DEBUG_DIR = Path(__file__).parent.parent / "debug" / "frames"
-_DEBUG_VIDEO_DIR = Path(__file__).parent.parent / "debug" / "videos"
-
-_HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),         # thumb
-    (0, 5), (5, 6), (6, 7), (7, 8),         # index
-    (5, 9), (9, 10), (10, 11), (11, 12),    # middle
-    (9, 13), (13, 14), (14, 15), (15, 16),  # ring
-    (13, 17), (17, 18), (18, 19), (19, 20), # pinky
-    (0, 17),                                 # palm base
-]
 
 
 # MediaPipe FaceLandmarker indices for the points we care about for ASL sign location.
@@ -36,28 +25,6 @@ _KEY_FACE_LANDMARKS: dict[str, int] = {
     "left_eyebrow":  336,
     "right_eyebrow": 107,
 }
-
-
-def _draw_landmarks(frame, result, face: dict | None = None):
-    annotated = frame.copy()
-    h, w = annotated.shape[:2]
-    for hand_landmarks in result.hand_landmarks:
-        pts = [(int(lm.x * w), int(lm.y * h)) for lm in hand_landmarks]
-        for a, b in _HAND_CONNECTIONS:
-            if a < len(pts) and b < len(pts):
-                cv2.line(annotated, pts[a], pts[b], (0, 200, 255), 2)
-        for cx, cy in pts:
-            cv2.circle(annotated, (cx, cy), 4, (0, 255, 0), -1)
-    if face is not None:
-        # Draw key facial points so the user can see where Gemini "thinks" the chin/forehead/etc are.
-        for name, (nx, ny) in face.items():
-            px, py = int(nx * w), int(ny * h)
-            cv2.circle(annotated, (px, py), 3, (255, 100, 200), -1)
-            cv2.putText(
-                annotated, name, (px + 4, py - 4),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.32, (255, 100, 200), 1, cv2.LINE_AA,
-            )
-    return annotated
 
 
 class FaceTracker:
@@ -204,27 +171,11 @@ class HandTracker:
             raise ValueError(f"Cannot open video: {video_path}")
 
         landmark_sequence: list[dict] = []
-        best_annotated = None
         best_count = 0
         frame_idx = 0
         frames_with_hands = 0
         timestamp_ms = cls._last_timestamp_ms
         face_box: dict | None = None
-
-        # Annotated video writer — lets the user inspect what MediaPipe actually saw.
-        # Writes to /debug/videos/{video_id}.mp4 inside container, mounted to host ./debug.
-        frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        annotated_video_path: Path | None = None
-        writer: "cv2.VideoWriter | None" = None
-        if video_id:
-            _DEBUG_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-            annotated_video_path = _DEBUG_VIDEO_DIR / f"{video_id}.mp4"
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(str(annotated_video_path), fourcc, fps, (frame_w, frame_h))
-            if not writer.isOpened():
-                logger.warning("Could not open annotated VideoWriter for %s", annotated_video_path)
-                writer = None
 
         logger.info("process_video: start video=%s fps=%.1f last_ts=%d", video_path, fps, timestamp_ms)
 
@@ -252,15 +203,11 @@ class HandTracker:
                 count = sum(len(hand) for hand in result.hand_landmarks)
                 if count > best_count:
                     best_count = count
-                    best_annotated = _draw_landmarks(frame, result, face_box)
 
                 if result.hand_landmarks:
                     frames_with_hands += 1
 
-                if writer is not None:
-                    writer.write(_draw_landmarks(frame, result, face_box))
-
-                if frame_idx % 3 == 0 and result.hand_landmarks:
+                if frame_idx % 2 == 0 and result.hand_landmarks:
                     entry: dict = {"frame": frame_idx}
 
                     # Named face landmarks (forehead/chin/etc.) — see FaceTracker.
@@ -292,8 +239,6 @@ class HandTracker:
                 frame_idx += 1
         finally:
             cap.release()
-            if writer is not None:
-                writer.release()
             cls._last_timestamp_ms = timestamp_ms
 
         logger.info(
@@ -302,16 +247,5 @@ class HandTracker:
             video_path, frame_idx, frames_with_hands, len(landmark_sequence), best_count,
         )
 
-        if annotated_video_path is not None and annotated_video_path.exists():
-            logger.info("Annotated video saved → %s", annotated_video_path)
-
         landmarks_found = best_count > 0
-
-        if best_annotated is not None:
-            _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-            tag = video_id or Path(video_path).stem
-            debug_path = _DEBUG_DIR / f"{tag}.png"
-            cv2.imwrite(str(debug_path), best_annotated)
-            logger.info("Debug frame saved → %s  (landmarks: %d)", debug_path, best_count)
-
         return landmark_sequence, landmarks_found

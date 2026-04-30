@@ -71,13 +71,27 @@ export const api = {
     }),
 };
 
-export const SESSION_ID: string = (() => {
-  // stable random UUID for this install — persists as module-level constant
+// Session ID is mutable so callers can start a fresh "thread" without auth —
+// TranslatePage calls resetSession() on mount so each visit = new conversation.
+function _newSessionId(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
   });
-})();
+}
+
+let _sessionId = _newSessionId();
+export const getSessionId = (): string => _sessionId;
+export const resetSession = (): string => {
+  _sessionId = _newSessionId();
+  return _sessionId;
+};
+// Restore a previously-used session id when the UI switches back to an
+// older conversation. Backend tmp files may have been cleared, but the
+// Conversation row keyed by this id should still exist.
+export const setSessionId = (sid: string): void => {
+  _sessionId = sid;
+};
 
 // ── endpoints ─────────────────────────────────────────────────────────────
 
@@ -107,7 +121,7 @@ export function recognizeSign(uri: string) {
   const formData = new FormData();
   formData.append('file', { uri, type: 'video/quicktime', name: 'sign.mov' } as any);
   return api.post<QueuedResponse>('/api/v1/sign/recognize', formData, {
-    headers: { 'X-Session-ID': SESSION_ID },
+    headers: { 'X-Session-ID': getSessionId() },
   });
 }
 
@@ -129,13 +143,68 @@ export type TranscribeResponse = { transcript: string };
 export type GlossResponse = { gloss: string };
 
 export function transcribeAudio(uri: string) {
+  // expo-av's HIGH_QUALITY preset produces .m4a on iOS but .mp4 on Android.
+  // Match the MIME type to the actual file extension so ElevenLabs scribe accepts it.
+  const lower = uri.toLowerCase();
+  let ext = 'm4a';
+  let type = 'audio/m4a';
+  if (lower.endsWith('.mp4'))      { ext = 'mp4';  type = 'audio/mp4'; }
+  else if (lower.endsWith('.wav')) { ext = 'wav';  type = 'audio/wav'; }
+  else if (lower.endsWith('.webm')){ ext = 'webm'; type = 'audio/webm'; }
+  else if (lower.endsWith('.aac')) { ext = 'aac';  type = 'audio/aac'; }
+  else if (lower.endsWith('.mp3')) { ext = 'mp3';  type = 'audio/mpeg'; }
+
   const formData = new FormData();
-  formData.append('file', { uri, type: 'audio/m4a', name: 'speech.m4a' } as any);
+  formData.append('file', { uri, type, name: `speech.${ext}` } as any);
   return api.post<TranscribeResponse>('/api/v1/speech/transcribe', formData, {
-    headers: { 'X-Session-ID': SESSION_ID },
+    headers: { 'X-Session-ID': getSessionId() },
   });
 }
 
 export function getGloss(text: string) {
   return api.postJson<GlossResponse>('/api/v1/speech/gloss', { text });
+}
+
+// ── conversation title ────────────────────────────────────────────────────
+
+export type ConversationTitleResponse = {
+  api_version: string;
+  title: string;
+};
+
+export function getConversationTitle(sessionId: string) {
+  return api.get<ConversationTitleResponse>(`/api/v1/conversations/${sessionId}/title`);
+}
+
+// ── voice design (ElevenLabs via Gemini) ───────────────────────────────────
+
+export type VoiceDesignParams = {
+  voice_description: string;
+  display_label: string;
+  tags: string[];
+};
+
+export type VoiceDesignResponse = {
+  api_version: string;
+  params: VoiceDesignParams;
+  sample_text: string;
+  audio_base64: string;
+  audio_mime: string;
+};
+
+export function designVoice(message: string) {
+  return api.postJson<VoiceDesignResponse>('/api/v1/voice/design', { message });
+}
+
+export type VoiceSpeakResponse = {
+  api_version: string;
+  audio_base64: string;
+  audio_mime: string;
+};
+
+export function speakWithDesignedVoice(voiceDescription: string, text: string) {
+  return api.postJson<VoiceSpeakResponse>('/api/v1/voice/speak', {
+    voice_description: voiceDescription,
+    text,
+  });
 }

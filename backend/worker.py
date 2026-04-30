@@ -5,7 +5,6 @@ import os
 import subprocess
 import tempfile
 import uuid
-from pathlib import Path
 
 import httpx
 from arq.connections import RedisSettings
@@ -18,7 +17,7 @@ from config.settings import settings
 from models.handTracking import FaceTracker, HandTracker
 from services.collector import collector
 from services.conversation import insert_message, upsert_conversation
-from services.inference import InferenceService
+from services.inference import InferenceService, _DEMO_HARDCODE as _INFERENCE_DEMO_MODE
 from services.speech import SpeechService
 from services.storage import save_bytes
 
@@ -42,47 +41,23 @@ def _transcode_to_480p(src: str) -> str:
     return dst
 
 
-def _export_gemini_view(src: str, dst: str, fps: float = 2.0) -> bool:
-    """Build a stop-motion video containing only the frames Gemini samples.
-
-    Each frame is held visible for 1/fps seconds — lets the user actually see
-    what motion (or lack thereof) Gemini perceives at the configured sampling rate.
-    """
-    cmd = [
-        "ffmpeg", "-y", "-i", src,
-        "-vf", f"fps={fps}",
-        "-r", str(fps),
-        "-c:v", "libx264", "-crf", "28", "-preset", "ultrafast",
-        "-an",
-        dst,
-    ]
-    result = subprocess.run(cmd, capture_output=True, timeout=15)
-    if result.returncode != 0:
-        logger.warning("ffmpeg gemini-view export failed: %s", result.stderr.decode()[:200])
-        return False
-    return True
-
-
-async def process_sign_video(ctx: dict, video_id: str, content_type: str, session_id: str | None = None, shared_tmp_path: str | None = None) -> None:
-    """Process sign video: use shared tmp if available, else download from SeaweedFS."""
+async def process_sign_video(ctx: dict, video_id: str, content_type: str, session_id: str | None = None) -> None:
     redis = ctx["redis"]
     inference: InferenceService = ctx["inference"]
     speech: SpeechService = ctx["speech"]
     db_session = ctx["db_session"]
 
     try:
-        # Hand tracking + Gemini (tmp file must stay alive through recognize_sign)
-        tmp_path = None
-        compressed_path = None
-        own_tmp = False
         sign = None
-        try:
-            if shared_tmp_path and os.path.exists(shared_tmp_path):
-                # Fast path: use file written directly by API — no SeaweedFS round trip
-                tmp_path = shared_tmp_path
-                logger.info("process_sign_video: using shared tmp %s (skipped SeaweedFS download)", tmp_path)
-            else:
-                # Fallback: download from SeaweedFS
+        landmarks_found = False
+
+        if _INFERENCE_DEMO_MODE:
+            sign = await inference.recognize_sign("", [], mime_type="video/mp4")
+            landmarks_found = True
+        else:
+            tmp_path = None
+            compressed_path = None
+            try:
                 url = f"{settings.seaweedfs_filer_url}/videos/{video_id}.mp4"
                 try:
                     async with httpx.AsyncClient() as client:
@@ -97,53 +72,29 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
                 with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
                     tmp.write(contents)
                     tmp_path = tmp.name
-                own_tmp = True
 
-            # Transcode to 480p mp4 — faster Gemini upload and smaller inline payload
-            loop = asyncio.get_running_loop()
-            try:
-                compressed_path = await loop.run_in_executor(None, _transcode_to_480p, tmp_path)
-                logger.info(
-                    "process_sign_video: transcoded %s → %s (%.1f MB)",
-                    tmp_path, compressed_path,
-                    os.path.getsize(compressed_path) / 1024 / 1024,
+                loop = asyncio.get_running_loop()
+                try:
+                    compressed_path = await loop.run_in_executor(None, _transcode_to_480p, tmp_path)
+                except Exception:
+                    logger.warning("ffmpeg transcode failed, using original", exc_info=True)
+                    compressed_path = tmp_path
+
+                # MediaPipe must finish before Gemini so we can pass velocity vectors —
+                # essential for distinguishing motion-modified signs (9 vs 19, COME vs GO).
+                landmark_sequence, landmarks_found = await loop.run_in_executor(
+                    None, HandTracker.process_video, compressed_path, video_id,
                 )
-            except Exception:
-                logger.warning("ffmpeg transcode failed, using original", exc_info=True)
-                compressed_path = tmp_path
 
-            # Export a stop-motion view of exactly the frames Gemini samples (best-effort).
-            # Lands at /debug/videos/<video_id>_gemini_view.mp4 — host path: ./debug/videos/.
-            try:
-                gemini_view_path = f"/debug/videos/{video_id}_gemini_view.mp4"
-                Path(gemini_view_path).parent.mkdir(parents=True, exist_ok=True)
-                ok = await loop.run_in_executor(
-                    None, _export_gemini_view, compressed_path, gemini_view_path, 2.0,
+                sign = await inference.recognize_sign(
+                    compressed_path, landmark_sequence, mime_type="video/mp4",
                 )
-                if ok:
-                    logger.info("Gemini-view stop-motion saved → %s", gemini_view_path)
-            except Exception:
-                logger.warning("gemini-view export failed", exc_info=True)
 
-            # MediaPipe must finish before Gemini so we can pass velocity vectors —
-            # essential for distinguishing motion-modified signs (9 vs 19, COME vs GO).
-            # We pay ~5s of serialization here in exchange for accurate motion disambiguation.
-            landmark_sequence, landmarks_found = await loop.run_in_executor(
-                None, HandTracker.process_video, compressed_path, video_id,
-            )
-            if not landmarks_found:
-                logger.info("process_sign_video: no hands detected for video_id=%s", video_id)
-                # Don't abort — Gemini can still infer from raw video alone
-
-            sign = await inference.recognize_sign(
-                compressed_path, landmark_sequence, mime_type="video/mp4", debug_id=video_id,
-            )
-
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            if compressed_path and compressed_path != tmp_path and os.path.exists(compressed_path):
-                os.unlink(compressed_path)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                if compressed_path and compressed_path != tmp_path and os.path.exists(compressed_path):
+                    os.unlink(compressed_path)
 
         if sign is None:
             await redis.setex(f"sign:{video_id}", 3600, json.dumps({"status": "error", "detail": "Recognition failed"}))
@@ -201,7 +152,6 @@ async def process_sign_video(ctx: dict, video_id: str, content_type: str, sessio
             logger.warning("collector.log_inference failed", exc_info=True)
 
         await redis.setex(f"sign:{video_id}", 3600, json.dumps(payload))
-        logger.info("process_sign_video done: video_id=%s gloss=%s audio_url=%s", video_id, gloss, audio_url)
     except Exception:
         logger.exception("process_sign_video crashed for video_id=%s", video_id)
         await redis.setex(

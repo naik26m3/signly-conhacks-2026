@@ -17,3 +17,8 @@ class ConversationMessagesResponse(BaseModel):
     conversation_id: str
     total: int
     messages: list[MessageItem]
+
+
+class ConversationTitleResponse(BaseModel):
+    api_version: str = "v1"
+    title: str
