@@ -22,6 +22,65 @@ function buildSignMtUrl(text) {
     return `${SIGN_MT_BASE}?${params.toString()}`;
 }
 
+// Strip sign.mt's own UI chrome (language picker, input bar, mic, download/share FABs)
+// so only the avatar viewer is visible. Our native input + mic drive everything via the URL.
+const HIDE_CHROME_JS = `
+(function () {
+  var css = [
+    /* language picker / top bar */
+    'app-language-selectors',
+    'app-spoken-to-signed',
+    'app-signed-to-spoken',
+    'mat-toolbar',
+    'header',
+    /* input area at the bottom */
+    'app-input-mode',
+    'app-desktop-input',
+    'app-mobile-input',
+    'app-spoken-language-input',
+    'app-text-input',
+    'app-mic-input',
+    'app-spoken-language-mic-input',
+    /* output FABs (download, share, orientation) */
+    'app-video-controls',
+    'app-pose-viewer-controls',
+    'app-download-button',
+    'app-share-button',
+    'button[mat-fab]',
+    'button[mat-mini-fab]',
+    /* generic fallbacks */
+    '.mat-mdc-fab',
+    '.mat-mdc-mini-fab',
+    '.language-selectors',
+    '.input-mode',
+    '.controls'
+  ].join(',') + ' { display: none !important; visibility: hidden !important; }';
+
+  var fillCss =
+    'app-translate, app-translate-desktop, app-translate-mobile,' +
+    'app-signed-language-output, app-pose-viewer, app-video {' +
+    '  width: 100% !important; height: 100% !important;' +
+    '  max-width: none !important; max-height: none !important;' +
+    '}' +
+    'html, body { background: #F9F6F1 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }';
+
+  function apply() {
+    var style = document.getElementById('signly-hide-chrome');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'signly-hide-chrome';
+      style.textContent = css + fillCss;
+      (document.head || document.documentElement).appendChild(style);
+    }
+  }
+
+  apply();
+  // Angular hydrates after first paint — keep re-applying as the DOM changes.
+  new MutationObserver(apply).observe(document.documentElement, { childList: true, subtree: true });
+  true;
+})();
+`;
+
 export default function AnimationPage({ onNavigateTo }) {
     const [inputText, setInputText] = useState('');
     const [submittedText, setSubmittedText] = useState('');
@@ -76,6 +135,8 @@ export default function AnimationPage({ onNavigateTo }) {
                             domStorageEnabled
                             mediaPlaybackRequiresUserAction={false}
                             allowsInlineMediaPlayback
+                            injectedJavaScriptBeforeContentLoaded={HIDE_CHROME_JS}
+                            injectedJavaScript={HIDE_CHROME_JS}
                             onLoadStart={() => setWebviewLoading(true)}
                             onLoadEnd={() => setWebviewLoading(false)}
                             startInLoadingState
@@ -97,42 +158,44 @@ export default function AnimationPage({ onNavigateTo }) {
             {/* Input area */}
             <View style={styles.inputArea}>
                 <View style={styles.inputRow}>
-                    <TextInput
-                        style={styles.textInput}
-                        value={inputText}
-                        onChangeText={setInputText}
-                        placeholder="Type something to sign…"
-                        placeholderTextColor="#a09880"
-                        returnKeyType="send"
-                        onSubmitEditing={handleSend}
-                        editable={!processingMic}
-                    />
+                    <View style={styles.chatBox}>
+                        <TextInput
+                            style={styles.textInput}
+                            value={inputText}
+                            onChangeText={setInputText}
+                            placeholder="Type something to sign…"
+                            placeholderTextColor="#a09880"
+                            returnKeyType="send"
+                            onSubmitEditing={handleSend}
+                            editable={!processingMic}
+                        />
+                        <TouchableOpacity
+                            style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
+                            onPress={handleSend}
+                            disabled={!inputText.trim()}
+                        >
+                            <MaterialIcons name="send" size={18} color="#FDF0D0" />
+                        </TouchableOpacity>
+                    </View>
+
                     <TouchableOpacity
-                        style={[styles.sendBtn, !inputText.trim() && styles.sendBtnDisabled]}
-                        onPress={handleSend}
-                        disabled={!inputText.trim()}
+                        style={[
+                            styles.fabMic,
+                            isRecording && styles.fabMicRecording,
+                            processingMic && styles.fabDisabled,
+                        ]}
+                        onPress={handleMicPress}
                     >
-                        <MaterialIcons name="send" size={20} color="#FDF0D0" />
+                        {processingMic
+                            ? <ActivityIndicator size="small" color="#fff" />
+                            : <MaterialCommunityIcons
+                                name={isRecording ? 'stop' : 'microphone'}
+                                size={18}
+                                color="#ffffff"
+                              />
+                        }
                     </TouchableOpacity>
                 </View>
-
-                <TouchableOpacity
-                    style={[
-                        styles.fabMic,
-                        isRecording && styles.fabMicRecording,
-                        processingMic && styles.fabDisabled,
-                    ]}
-                    onPress={handleMicPress}
-                >
-                    {processingMic
-                        ? <ActivityIndicator size="small" color="#fff" />
-                        : <MaterialCommunityIcons
-                            name={isRecording ? 'stop' : 'microphone'}
-                            size={24}
-                            color="#ffffff"
-                          />
-                    }
-                </TouchableOpacity>
             </View>
 
             {/* Nav bar */}
@@ -222,30 +285,35 @@ const styles = StyleSheet.create({
     inputArea: {
         paddingHorizontal: 20,
         paddingBottom: 12,
-        gap: 12,
-        alignItems: 'center',
     },
     inputRow: {
         width: '100%',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
     },
-    textInput: {
+    chatBox: {
         flex: 1,
-        height: 48,
-        borderRadius: 24,
-        paddingHorizontal: 18,
+        height: 52,
+        borderRadius: 26,
         backgroundColor: '#fff',
         borderWidth: 1,
         borderColor: '#e0d8cc',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingLeft: 18,
+        paddingRight: 6,
+    },
+    textInput: {
+        flex: 1,
         fontSize: 15,
         color: '#2c2c2e',
+        paddingVertical: 0,
     },
     sendBtn: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         backgroundColor: '#432818',
         justifyContent: 'center',
         alignItems: 'center',
@@ -254,17 +322,12 @@ const styles = StyleSheet.create({
         opacity: 0.4,
     },
     fabMic: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         backgroundColor: '#3d2c22',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#b47e5f',
-        shadowOpacity: 0.8,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 6,
     },
     fabMicRecording: {
         backgroundColor: '#c0392b',
