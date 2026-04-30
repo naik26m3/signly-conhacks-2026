@@ -1,41 +1,14 @@
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Stack } from 'expo-router';
+import TranslatePage from './TranslatePage';
+import AnimationPage from './AnimationPage';
 
-import { CameraRecorder } from '@/components/camera-recorder';
-import { PermissionsGate } from '@/components/permissions-gate';
-import { VideoPreview } from '@/components/video-preview';
-import { useVideoUpload } from '@/hooks/use-video-upload';
+type Tab = 'translate' | 'animation';
 
 export default function App() {
-  const [videoUri, setVideoUri] = useState<string | null>(null);
-  const { upload, send, reset } = useVideoUpload();
+  const [activeTab, setActiveTab] = useState<Tab>('translate');
 
-  const handleReset = () => {
-    reset();
-    setVideoUri(null);
-  };
-
-  return (
-    <PermissionsGate>
-      <View style={styles.container}>
-        <Stack.Screen options={{ headerShown: false }} />
-        {videoUri ? (
-          <VideoPreview
-            uri={videoUri}
-            upload={upload}
-            onSend={() => send(videoUri)}
-            onCancel={handleReset}
-            onReset={handleReset}
-          />
-        ) : (
-          <CameraRecorder onRecorded={setVideoUri} />
-        )}
-      </View>
-    </PermissionsGate>
-  );
+  if (activeTab === 'animation') {
+    return <AnimationPage onNavigateTo={setActiveTab} />;
+  }
+  return <TranslatePage onNavigateTo={setActiveTab} />;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'black' },
-});
