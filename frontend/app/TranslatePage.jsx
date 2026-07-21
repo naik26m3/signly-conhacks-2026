@@ -1,3 +1,4 @@
+import { BottomNav } from '@/components/bottom-nav';
 import { CameraRecorder } from '@/components/camera-recorder';
 import { HistoryDrawer } from '@/components/history-drawer';
 import { VoicePickerModal } from '@/components/voice-picker-modal';
@@ -495,6 +496,13 @@ export default function TranslatePage({ onNavigateTo }) {
                 >
                     {messages.length === 0 && !processingSign && !processingMic && (
                         <View style={styles.emptyState}>
+                            <View style={styles.emptyIconBadge}>
+                                <Image
+                                    source={require('../assets/images/empty-translate.png')}
+                                    style={styles.emptyIcon}
+                                    resizeMode="contain"
+                                />
+                            </View>
                             <Text style={styles.emptyText}>Tap the camera to sign{'\n'}or the mic to speak</Text>
                         </View>
                     )}
@@ -540,24 +548,7 @@ export default function TranslatePage({ onNavigateTo }) {
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.navBar}>
-                    <View style={[styles.navItem, styles.navItemActive]}>
-                        <Image
-                            source={require('../assets/images/signly-logo.png')}
-                            style={{ width: 18, height: 18, tintColor: '#FDF0D0' }}
-                            resizeMode="contain"
-                        />
-                        <Text style={styles.navLabelActive}>Translate</Text>
-                    </View>
-                    <TouchableOpacity style={styles.navItem} onPress={() => onNavigateTo('animation')}>
-                        <MaterialCommunityIcons name="hand-wave" size={18} color="#817f74" />
-                        <Text style={styles.navLabelInactive}>Animation</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.navItem} onPress={() => onNavigateTo('voice')}>
-                        <MaterialCommunityIcons name="account-voice" size={18} color="#817f74" />
-                        <Text style={styles.navLabelInactive}>Voice</Text>
-                    </TouchableOpacity>
-                </View>
+                <BottomNav active="translate" onNavigateTo={onNavigateTo} />
 
                 <HistoryDrawer
                     visible={drawerOpen}
@@ -709,6 +700,30 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingBottom: 60,
+        gap: 16,
+    },
+    // Matches the badge on Voice and Animation so all three empty states agree.
+    emptyIconBadge: {
+        width: 96,
+        height: 96,
+        borderRadius: 48,
+        backgroundColor: '#FDF0D0',
+        borderWidth: 1,
+        borderColor: '#e0d8cc',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#432818',
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 2,
+    },
+    // tintColor flattens the artwork to exactly the brand brown, so the three
+    // empty-state marks stay identical in hue even if the source PNGs drift.
+    emptyIcon: {
+        width: 48,
+        height: 48,
+        tintColor: '#432818',
     },
     emptyText: {
         color: '#a09880',
@@ -909,45 +924,5 @@ const styles = StyleSheet.create({
     },
     fabDisabled: {
         opacity: 0.6,
-    },
-
-    // ── nav bar ──
-    navBar: {
-        width: '94%',
-        marginBottom: 24,
-        alignSelf: 'center',
-        backgroundColor: 'rgba(255,255,255,0.55)',
-        borderRadius: 50,
-        paddingVertical: 12,
-        paddingHorizontal: 10,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowRadius: 18,
-        elevation: 6,
-    },
-    navItem: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 12,
-    },
-    navItemActive: {
-        backgroundColor: 'rgba(100,88,68,0.82)',
-        borderRadius: 20,
-    },
-    navLabelInactive: {
-        color: '#817f74',
-        fontSize: 12,
-        fontWeight: '700',
-        marginTop: 6,
-    },
-    navLabelActive: {
-        color: '#FDF0D0',
-        fontSize: 12,
-        fontWeight: '700',
-        marginTop: 6,
     },
 });

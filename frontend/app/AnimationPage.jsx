@@ -1,5 +1,6 @@
 // Credit to https://sign.mt/
 
+import { BottomNav } from '@/components/bottom-nav';
 import { HistoryDrawer } from '@/components/history-drawer';
 import { VoicePickerModal } from '@/components/voice-picker-modal';
 import { useSessionScope } from '@/contexts/SessionContext';
@@ -50,16 +51,28 @@ const HIDE_CHROME_JS = `
     'app-text-input',
     'app-mic-input',
     'app-spoken-language-mic-input',
-    /* output FABs (download, share, orientation) */
+    /* output FABs (download, share, orientation, fullscreen) */
     'app-video-controls',
     'app-pose-viewer-controls',
     'app-download-button',
     'app-share-button',
-    'button[mat-fab]',
-    'button[mat-mini-fab]',
+    /* Angular Material FABs — class names differ across MDC versions, so match
+       on substring rather than an exact list. This is what was leaking through
+       as the purple download/share buttons. */
+    '[class*="mat-fab"]',
+    '[class*="mat-mini-fab"]',
+    '[class*="mat-mdc-fab"]',
+    '[class*="mat-mdc-mini-fab"]',
+    '[class*="mdc-fab"]',
+    '[mat-fab]',
+    '[mat-mini-fab]',
+    /* Nothing inside the frame is ever meant to be tapped — our native UI drives
+       the whole page via the URL — so every control goes, whatever it's called.
+       The pose viewer autoplays and needs no buttons. */
+    'button',
+    '[role="button"]',
+    'mat-icon-button',
     /* generic fallbacks */
-    '.mat-mdc-fab',
-    '.mat-mdc-mini-fab',
     '.language-selectors',
     '.input-mode',
     '.controls'
@@ -71,6 +84,8 @@ const HIDE_CHROME_JS = `
     '  width: 100% !important; height: 100% !important;' +
     '  max-width: none !important; max-height: none !important;' +
     '}' +
+    /* Collapse the empty strip Angular leaves where the toolbar used to be. */
+    'app-translate > *:empty { display: none !important; }' +
     'html, body { background: #F9F6F1 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }';
 
   function apply() {
@@ -79,7 +94,12 @@ const HIDE_CHROME_JS = `
       style = document.createElement('style');
       style.id = 'signly-hide-chrome';
       style.textContent = css + fillCss;
-      (document.head || document.documentElement).appendChild(style);
+    }
+    var parent = document.head || document.documentElement;
+    // Re-append rather than bail early: Angular injects its own stylesheets after
+    // hydration, and our rules must stay last in the cascade to win reliably.
+    if (style.parentNode !== parent || parent.lastChild !== style) {
+      parent.appendChild(style);
     }
   }
 
@@ -181,7 +201,11 @@ export default function AnimationPage({ onNavigateTo }) {
                 {!hasContent ? (
                     <View style={styles.emptyState}>
                         <View style={styles.emptyIconBadge}>
-                            <MaterialCommunityIcons name="hand-wave-outline" size={48} color="#432818" />
+                            <Image
+                                source={require('../assets/images/empty-animation.png')}
+                                style={styles.emptyIcon}
+                                resizeMode="contain"
+                            />
                         </View>
                         <Text style={styles.emptyText}>Type or speak to see{'\n'}the ASL avatar sign it</Text>
                     </View>
@@ -241,24 +265,7 @@ export default function AnimationPage({ onNavigateTo }) {
             </View>
 
             {/* Nav bar */}
-            <View style={styles.navBar}>
-                <TouchableOpacity style={styles.navItem} onPress={() => onNavigateTo('translate')}>
-                    <Image
-                        source={require('../assets/images/signly-logo.png')}
-                        style={{ width: 18, height: 18, tintColor: '#817f74' }}
-                        resizeMode="contain"
-                    />
-                    <Text style={styles.navLabelInactive}>Translate</Text>
-                </TouchableOpacity>
-                <View style={[styles.navItem, styles.navItemActive]}>
-                    <MaterialCommunityIcons name="hand-wave" size={18} color="#FDF0D0" />
-                    <Text style={styles.navLabelActive}>Animation</Text>
-                </View>
-                <TouchableOpacity style={styles.navItem} onPress={() => onNavigateTo('voice')}>
-                    <MaterialCommunityIcons name="account-voice" size={18} color="#817f74" />
-                    <Text style={styles.navLabelInactive}>Voice</Text>
-                </TouchableOpacity>
-            </View>
+            <BottomNav active="animation" onNavigateTo={onNavigateTo} />
 
             <HistoryDrawer
                 visible={drawerOpen}
@@ -373,6 +380,13 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 4 },
         elevation: 2,
     },
+    // tintColor flattens the artwork to exactly the brand brown, so the three
+    // empty-state marks stay identical in hue even if the source PNGs drift.
+    emptyIcon: {
+        width: 48,
+        height: 48,
+        tintColor: '#432818',
+    },
     emptyText: {
         color: '#a09880',
         fontSize: 15,
@@ -419,44 +433,5 @@ const styles = StyleSheet.create({
     },
     sendBtnDisabled: {
         opacity: 0.4,
-    },
-    // ── nav bar ──
-    navBar: {
-        width: '94%',
-        marginBottom: 24,
-        alignSelf: 'center',
-        backgroundColor: 'rgba(255,255,255,0.55)',
-        borderRadius: 50,
-        paddingVertical: 12,
-        paddingHorizontal: 10,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowRadius: 18,
-        elevation: 6,
-    },
-    navItem: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 12,
-    },
-    navItemActive: {
-        backgroundColor: 'rgba(100,88,68,0.82)',
-        borderRadius: 20,
-    },
-    navLabelInactive: {
-        color: '#817f74',
-        fontSize: 12,
-        fontWeight: '700',
-        marginTop: 6,
-    },
-    navLabelActive: {
-        color: '#FDF0D0',
-        fontSize: 12,
-        fontWeight: '700',
-        marginTop: 6,
     },
 });
